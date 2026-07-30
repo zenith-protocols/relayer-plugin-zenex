@@ -5,6 +5,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # typescript-eslint pins typescript <6.1.0; revisit when its peer range moves
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # @types/node tracks the lowest supported node major (engines >=20.19)
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:
