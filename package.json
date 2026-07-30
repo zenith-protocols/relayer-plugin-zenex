@@ -1,0 +1,67 @@
+{
+  "name": "@zenith-protocols/relayer-plugin-zenex",
+  "version": "0.1.0",
+  "description": "OpenZeppelin Relayer Plugin for the Zenex Transaction Relay",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "package.json"
+  ],
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc",
+    "lint": "eslint . --fix",
+    "lint:check": "eslint .",
+    "prettier:check": "prettier -u --check '**/*.{js,ts,tsx,md}'",
+    "prettier:fix": "prettier -u --write '**/*.{js,ts,tsx,md}'",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zenith-protocols/relayer-plugin-zenex.git"
+  },
+  "homepage": "https://github.com/zenith-protocols/relayer-plugin-zenex#readme",
+  "bugs": {
+    "url": "https://github.com/zenith-protocols/relayer-plugin-zenex/issues"
+  },
+  "keywords": [
+    "stellar",
+    "soroban",
+    "openzeppelin-relayer",
+    "relayer-plugin",
+    "pyth",
+    "zenex"
+  ],
+  "author": "Robeart",
+  "license": "MIT",
+  "dependencies": {
+    "@openzeppelin/relayer-plugin-channels": "^0.20.0",
+    "@openzeppelin/relayer-sdk": "^1.10.0",
+    "@stellar/stellar-sdk": "^16.1.0",
+    "axios": "^1.13.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^20.19.43",
+    "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^9.1.2",
+    "eslint-plugin-prettier": "^5.5.5",
+    "prettier": "^3.8.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}
