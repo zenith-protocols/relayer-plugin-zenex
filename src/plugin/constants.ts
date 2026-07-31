@@ -18,6 +18,7 @@ export const HTTP_STATUS = {
 export const PYTH = {
   LATEST_PRICE_URL: 'https://pyth-lazer-0.dourolabs.app/v1/latest_price',
   FETCH_TIMEOUT_MS: 5_000,
+  RETRY_DELAY_MS: 250,
   XLM_USD_FEED_ID: 23,
   // Every property the on-chain price verifier requires in the signed payload; it rejects (error 781) a payload missing any.
   LATEST_PRICE_PROPERTIES: ['price', 'bestBidPrice', 'bestAskPrice', 'exponent', 'confidence', 'feedUpdateTimestamp'],

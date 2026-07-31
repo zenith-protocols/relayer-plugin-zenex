@@ -19,10 +19,10 @@ interface LazerLatestPriceBody {
   leEcdsa: { data: string };
 }
 
-/** One feed per request — the on-chain verifier expects single-feed leEcdsa payloads; any failure is PRICE_UNAVAILABLE (fail closed). */
-async function fetchLazerPrice(feedId: number, token: string, channel: string): Promise<LazerPrice> {
-  try {
-    const response = await fetch(PYTH.LATEST_PRICE_URL, {
+/** A dropped socket or upstream hiccup is worth one more attempt; a 4xx is not. */
+async function latestPriceResponse(feedId: number, token: string, channel: string): Promise<Response> {
+  const request = (): Promise<Response> =>
+    fetch(PYTH.LATEST_PRICE_URL, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -35,6 +35,21 @@ async function fetchLazerPrice(feedId: number, token: string, channel: string): 
       }),
       signal: AbortSignal.timeout(PYTH.FETCH_TIMEOUT_MS),
     });
+  try {
+    const response = await request();
+    if (response.status < 500) return response;
+  } catch {
+    // Network-level failure: idle keep-alive sockets die between sporadic
+    // requests, so the first reuse after a quiet spell can fail spuriously.
+  }
+  await new Promise((resolve) => setTimeout(resolve, PYTH.RETRY_DELAY_MS));
+  return request();
+}
+
+/** One feed per request — the on-chain verifier expects single-feed leEcdsa payloads; any failure is PRICE_UNAVAILABLE (fail closed). */
+async function fetchLazerPrice(feedId: number, token: string, channel: string): Promise<LazerPrice> {
+  try {
+    const response = await latestPriceResponse(feedId, token, channel);
     if (!response.ok) throw new Error(`latest_price responded ${response.status}`);
     const body = (await response.json()) as LazerLatestPriceBody;
     const feed = body.parsed.priceFeeds.find((entry) => entry.priceFeedId === feedId);
