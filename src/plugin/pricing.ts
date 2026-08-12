@@ -78,7 +78,14 @@ function authHeaders(path: string, access: DataStreamsAccess): Record<string, st
   };
 }
 
-/** A dropped socket or upstream hiccup is worth one more attempt; a 4xx is not. */
+/** A 429's Retry-After when it names a delay we can afford; the default backoff otherwise. */
+function retryDelayMs(response: Response): number {
+  const seconds = Number(response.headers?.get?.('retry-after'));
+  if (!Number.isFinite(seconds) || seconds < 0) return DATASTREAMS.RETRY_DELAY_MS;
+  return Math.min(seconds * 1000, DATASTREAMS.RETRY_DELAY_MAX_MS);
+}
+
+/** A dropped socket, upstream hiccup, or rate limit is worth one more attempt; any other 4xx is not. */
 async function latestReportResponse(feedId: string, access: DataStreamsAccess): Promise<Response> {
   const path = `${DATASTREAMS.LATEST_REPORT_PATH}?feedID=${feedId}`;
   const request = (): Promise<Response> =>
@@ -88,14 +95,16 @@ async function latestReportResponse(feedId: string, access: DataStreamsAccess): 
       headers: authHeaders(path, access),
       signal: AbortSignal.timeout(DATASTREAMS.FETCH_TIMEOUT_MS),
     });
+  let delay = DATASTREAMS.RETRY_DELAY_MS;
   try {
     const response = await request();
-    if (response.status < 500) return response;
+    if (response.status < 500 && response.status !== 429) return response;
+    if (response.status === 429) delay = retryDelayMs(response);
   } catch {
     // Network-level failure: idle keep-alive sockets die between sporadic
     // requests, so the first reuse after a quiet spell can fail spuriously.
   }
-  await new Promise((resolve) => setTimeout(resolve, DATASTREAMS.RETRY_DELAY_MS));
+  await new Promise((resolve) => setTimeout(resolve, delay));
   return request();
 }
 

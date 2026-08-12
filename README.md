@@ -227,7 +227,7 @@ const status = await client.getTransaction({ transactionId: submitted.transactio
 ```
 
 `prepareFill` / `prepareTryFill` take the same request with a required
-`feedId` (a Data Streams feed id, bytes32 hex). In relayer mode `getTransaction` uses the embedded channels surface
+`feedId` (a V3 Data Streams feed id: `0x0003…` bytes32 hex). In relayer mode `getTransaction` uses the embedded channels surface
 on the bare route; in direct mode it posts to the edge service's `/status`.
 
 ## Routes

@@ -24,6 +24,8 @@ export const DATASTREAMS = {
   LATEST_REPORT_PATH: '/api/v1/reports/latest',
   FETCH_TIMEOUT_MS: 5_000,
   RETRY_DELAY_MS: 250,
+  /** Cap on an honored Retry-After — a relay caller is gone long before a long rate-limit window ends. */
+  RETRY_DELAY_MAX_MS: 2_000,
 } as const;
 
 // Simulation-related defaults

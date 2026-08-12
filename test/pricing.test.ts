@@ -145,6 +145,33 @@ describe('fetchMarketUpdate', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  test('retries once on a 429, honoring Retry-After', async () => {
+    const fullReport = encodeFullReport(XLM_BODY);
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      headers: { get: (name: string) => (name === 'retry-after' ? '0' : null) },
+      json: async () => ({}),
+    });
+    fetchMock.mockResolvedValueOnce(reportResponse(XLM_FEED_ID, fullReport));
+    const update = await fetchMarketUpdate(XLM_FEED_ID, ACCESS);
+    expect(Buffer.from(update)).toEqual(fullReport);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('a 429 on both attempts still fails closed as PRICE_UNAVAILABLE', async () => {
+    const tooMany = () => ({
+      ok: false,
+      status: 429,
+      headers: { get: (name: string) => (name === 'retry-after' ? '0' : null) },
+      json: async () => ({}),
+    });
+    fetchMock.mockResolvedValueOnce(tooMany());
+    fetchMock.mockResolvedValueOnce(tooMany());
+    await expect(fetchMarketUpdate(XLM_FEED_ID, ACCESS)).rejects.toMatchObject({ code: 'PRICE_UNAVAILABLE' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   test('maps a report for a different feed to PRICE_UNAVAILABLE', async () => {
     fetchMock.mockResolvedValueOnce(okReport(MARKET_FEED_ID));
     await expect(fetchMarketUpdate(XLM_FEED_ID, ACCESS)).rejects.toMatchObject({ code: 'PRICE_UNAVAILABLE' });
