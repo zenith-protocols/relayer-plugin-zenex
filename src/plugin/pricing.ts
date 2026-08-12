@@ -95,7 +95,7 @@ async function latestReportResponse(feedId: string, access: DataStreamsAccess): 
       headers: authHeaders(path, access),
       signal: AbortSignal.timeout(DATASTREAMS.FETCH_TIMEOUT_MS),
     });
-  let delay = DATASTREAMS.RETRY_DELAY_MS;
+  let delay: number = DATASTREAMS.RETRY_DELAY_MS;
   try {
     const response = await request();
     if (response.status < 500 && response.status !== 429) return response;
