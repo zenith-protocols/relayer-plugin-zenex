@@ -1,6 +1,6 @@
 {
   "name": "@zenith-protocols/relayer-plugin-zenex",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "OpenZeppelin Relayer Plugin for the Zenex Transaction Relay",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -37,7 +37,8 @@
     "soroban",
     "openzeppelin-relayer",
     "relayer-plugin",
-    "pyth",
+    "chainlink",
+    "data-streams",
     "zenex"
   ],
   "author": "Robeart",

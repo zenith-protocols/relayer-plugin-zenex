@@ -6,8 +6,12 @@
 
 import { Networks } from '@stellar/stellar-sdk';
 import { pluginError, PluginContext } from '@openzeppelin/relayer-sdk';
-import { HTTP_STATUS } from './constants';
+import { DATASTREAMS, HTTP_STATUS } from './constants';
+import { DataStreamsAccess } from './pricing';
 import { RelayParseConfig } from './types';
+
+/** A Data Streams feed id: 0x-prefixed bytes32 hex. */
+export const FEED_ID_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 
 export interface ZenexConfig {
   /** The Router contract every relayed func must target. */
@@ -17,13 +21,14 @@ export interface ZenexConfig {
   feeRateBps: number;
   feeTokenContractId: string;
   feeTokenDecimals: number;
-  /** The Lazer channel this operator's Pyth token is entitled to. */
-  pythChannel: string;
+  /** The Data Streams XLM/USD feed id (bytes32 hex) used for fee conversion. */
+  xlmUsdFeedId: string;
   network: 'testnet' | 'mainnet';
   networkPassphrase: string;
   /** Carries every chain read; its address is the simulation source. */
   fundRelayerId: string;
-  pythToken: string;
+  dsUserId: string;
+  dsHmacSecret: string;
 }
 
 // Reports only the offending field, never its value — plugin error messages serialize back to callers.
@@ -68,7 +73,7 @@ export function loadConfig(context: PluginContext): ZenexConfig {
   const config = (context.config ?? {}) as Record<string, unknown>;
   const fees = (config.fees ?? {}) as Record<string, unknown>;
   const feeToken = (fees.feeToken ?? {}) as Record<string, unknown>;
-  rejectUnknownKeys(config, ['router', 'feeRecipient', 'fees', 'pythChannel'], '');
+  rejectUnknownKeys(config, ['router', 'feeRecipient', 'fees', 'xlmUsdFeedId'], '');
   rejectUnknownKeys(fees, ['feeRateBps', 'feeToken'], 'fees');
   rejectUnknownKeys(feeToken, ['contractId', 'decimals'], 'fees.feeToken');
   const feeRateBps = fees.feeRateBps;
@@ -92,11 +97,28 @@ export function loadConfig(context: PluginContext): ZenexConfig {
     feeRateBps,
     feeTokenContractId: requireConfigString(feeToken.contractId, 'fees.feeToken.contractId'),
     feeTokenDecimals: 7,
-    pythChannel: requireConfigString(config.pythChannel, 'pythChannel'),
+    xlmUsdFeedId: requireFeedId(config.xlmUsdFeedId),
     network: networkRaw,
     networkPassphrase: networkRaw === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET,
     fundRelayerId: requireEnv('FUND_RELAYER_ID'),
-    pythToken: requireEnv('PYTH_ACCESS_TOKEN'),
+    dsUserId: requireEnv('DS_USER_ID'),
+    dsHmacSecret: requireEnv('DS_HMAC_SECRET'),
+  };
+}
+
+// Normalized to lowercase so feed comparisons (market vs XLM/USD) are plain equality.
+function requireFeedId(value: unknown): string {
+  const feedId = requireConfigString(value, 'xlmUsdFeedId');
+  if (!FEED_ID_PATTERN.test(feedId)) configInvalid('xlmUsdFeedId');
+  return feedId.toLowerCase();
+}
+
+/** The Data Streams endpoint (by network) and credentials the pricing calls use. */
+export function dataStreamsAccess(config: ZenexConfig): DataStreamsAccess {
+  return {
+    host: DATASTREAMS.HOSTS[config.network],
+    userId: config.dsUserId,
+    hmacSecret: config.dsHmacSecret,
   };
 }
 

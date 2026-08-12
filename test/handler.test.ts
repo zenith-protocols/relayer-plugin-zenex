@@ -8,11 +8,14 @@ import {
   makeCallXdr,
   makeFakeRelayer,
   makeWrap,
+  MARKET_FEED_ID,
   OTHER_CONTRACT,
   ROUTER,
   SOURCE,
   USER,
+  XLM_FEED_ID,
 } from './helpers';
+import { DATASTREAMS } from '../src/plugin/constants';
 
 const channelsHandler = vi.fn();
 vi.mock('@openzeppelin/relayer-plugin-channels', () => ({
@@ -28,7 +31,7 @@ vi.mock('../src/plugin/pricing', () => ({
 
 import { handler } from '../src/plugin/handler';
 
-const ENV_KEYS = ['STELLAR_NETWORK', 'FUND_RELAYER_ID', 'PYTH_ACCESS_TOKEN'] as const;
+const ENV_KEYS = ['STELLAR_NETWORK', 'FUND_RELAYER_ID', 'DS_USER_ID', 'DS_HMAC_SECRET'] as const;
 const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
 let fundRelayerCounter = 0;
 
@@ -37,8 +40,11 @@ beforeEach(() => {
   process.env.STELLAR_NETWORK = 'testnet';
   // Unique per test: the handler caches relayer info per `${network}:${relayerId}`.
   process.env.FUND_RELAYER_ID = `fund-${fundRelayerCounter++}`;
-  process.env.PYTH_ACCESS_TOKEN = 'pyth-token';
+  process.env.DS_USER_ID = 'ds-user-uuid';
+  process.env.DS_HMAC_SECRET = 'ds-hmac-secret';
 });
+
+const EXPECTED_ACCESS = { host: DATASTREAMS.HOSTS.testnet, userId: 'ds-user-uuid', hmacSecret: 'ds-hmac-secret' };
 
 afterAll(() => {
   for (const key of ENV_KEYS) {
@@ -52,7 +58,7 @@ function pluginConfig(): Record<string, unknown> {
     router: ROUTER,
     feeRecipient: FEE_RECIPIENT,
     fees: { feeRateBps: 30, feeToken: { contractId: FEE_TOKEN, decimals: 7 } },
-    pythChannel: 'fixed_rate@1000ms',
+    xlmUsdFeedId: XLM_FEED_ID,
   };
 }
 
@@ -92,7 +98,7 @@ describe('handler routing', () => {
 });
 
 describe('prepare routes', () => {
-  test('prepares an unpriced multicall without touching Pyth', async () => {
+  test('prepares an unpriced multicall without touching Data Streams', async () => {
     const wrap = makeWrap('calls');
     const relayer = makeFakeRelayer({
       record: { auth: [makeAuthEntry(wrap, USER)], retval: xdr.ScVal.scvVec([]), latestLedger: 100 },
@@ -128,14 +134,14 @@ describe('prepare routes', () => {
         calls: [makeCallXdr(OTHER_CONTRACT, 'transfer')],
         expirationLedger: 1_000,
         maxFeeAmountAtomic: '1000000',
-        feedId: 42,
+        feedId: MARKET_FEED_ID,
       },
       relayer
     );
 
     const result = (await handler(context)) as { func: string };
     expect(result.func).toBe(wrap.toXDR('base64').toString());
-    expect(fetchMarketUpdate).toHaveBeenCalledWith(42, 'pyth-token', 'fixed_rate@1000ms');
+    expect(fetchMarketUpdate).toHaveBeenCalledWith(MARKET_FEED_ID, EXPECTED_ACCESS);
   });
 
   test('rejects a priced prepare without a feedId before any network call', async () => {
@@ -200,7 +206,7 @@ describe('submit route', () => {
 
     const result = await handler(context);
     expect(result).toEqual({ transactionId: 'tx-1', status: 'submitted', hash: null });
-    expect(fetchRelayPrices).toHaveBeenCalledWith(null, 'pyth-token', 'fixed_rate@1000ms');
+    expect(fetchRelayPrices).toHaveBeenCalledWith(null, XLM_FEED_ID, EXPECTED_ACCESS);
 
     const forwarded = channelsHandler.mock.calls[0]![0] as PluginContext;
     expect(forwarded.params).toMatchObject({ skipWait: true });

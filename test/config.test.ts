@@ -1,10 +1,11 @@
 import { describe, test, expect, beforeEach, afterAll } from 'vitest';
 import { Networks } from '@stellar/stellar-sdk';
 import type { PluginContext } from '@openzeppelin/relayer-sdk';
-import { loadConfig, relayParseConfig } from '../src/plugin/config';
-import { FEE_RECIPIENT, FEE_TOKEN, ROUTER } from './helpers';
+import { dataStreamsAccess, loadConfig, relayParseConfig } from '../src/plugin/config';
+import { DATASTREAMS } from '../src/plugin/constants';
+import { FEE_RECIPIENT, FEE_TOKEN, ROUTER, XLM_FEED_ID } from './helpers';
 
-const ENV_KEYS = ['STELLAR_NETWORK', 'FUND_RELAYER_ID', 'PYTH_ACCESS_TOKEN'] as const;
+const ENV_KEYS = ['STELLAR_NETWORK', 'FUND_RELAYER_ID', 'DS_USER_ID', 'DS_HMAC_SECRET'] as const;
 const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 function validPluginConfig(): Record<string, unknown> {
@@ -12,7 +13,7 @@ function validPluginConfig(): Record<string, unknown> {
     router: ROUTER,
     feeRecipient: FEE_RECIPIENT,
     fees: { feeRateBps: 30, feeToken: { contractId: FEE_TOKEN, decimals: 7 } },
-    pythChannel: 'fixed_rate@1000ms',
+    xlmUsdFeedId: XLM_FEED_ID,
   };
 }
 
@@ -23,7 +24,8 @@ function contextWith(config: unknown): PluginContext {
 beforeEach(() => {
   process.env.STELLAR_NETWORK = 'testnet';
   process.env.FUND_RELAYER_ID = 'channels-fund';
-  process.env.PYTH_ACCESS_TOKEN = 'pyth-token';
+  process.env.DS_USER_ID = 'ds-user-uuid';
+  process.env.DS_HMAC_SECRET = 'ds-hmac-secret';
 });
 
 afterAll(() => {
@@ -42,11 +44,12 @@ describe('loadConfig', () => {
       feeRateBps: 30,
       feeTokenContractId: FEE_TOKEN,
       feeTokenDecimals: 7,
-      pythChannel: 'fixed_rate@1000ms',
+      xlmUsdFeedId: XLM_FEED_ID,
       network: 'testnet',
       networkPassphrase: Networks.TESTNET,
       fundRelayerId: 'channels-fund',
-      pythToken: 'pyth-token',
+      dsUserId: 'ds-user-uuid',
+      dsHmacSecret: 'ds-hmac-secret',
     });
   });
 
@@ -81,10 +84,25 @@ describe('loadConfig', () => {
     expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: fees.feeToken.decimals');
   });
 
-  test.each(['router', 'feeRecipient', 'pythChannel'] as const)('rejects a missing %s', (field) => {
+  test.each(['router', 'feeRecipient', 'xlmUsdFeedId'] as const)('rejects a missing %s', (field) => {
     const config = validPluginConfig();
     delete config[field];
     expect(() => loadConfig(contextWith(config))).toThrow(`Invalid plugin config: ${field}`);
+  });
+
+  test.each(['23', XLM_FEED_ID.slice(2), XLM_FEED_ID.slice(0, -2), `${XLM_FEED_ID}ff`, '0xzz'])(
+    'rejects a malformed xlmUsdFeedId: %j',
+    (xlmUsdFeedId) => {
+      const config = validPluginConfig();
+      config.xlmUsdFeedId = xlmUsdFeedId;
+      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: xlmUsdFeedId');
+    }
+  );
+
+  test('normalizes an uppercase xlmUsdFeedId to lowercase', () => {
+    const config = validPluginConfig();
+    config.xlmUsdFeedId = XLM_FEED_ID.toUpperCase().replace('0X', '0x');
+    expect(loadConfig(contextWith(config)).xlmUsdFeedId).toBe(XLM_FEED_ID);
   });
 
   test('rejects a missing feeToken contractId', () => {
@@ -114,5 +132,19 @@ describe('relayParseConfig', () => {
       router: ROUTER,
       feeToken: { contractId: FEE_TOKEN, decimals: 7, feeRateBps: 30 },
     });
+  });
+});
+
+describe('dataStreamsAccess', () => {
+  test('projects the Data Streams access from the loaded config, host by network', () => {
+    const config = loadConfig(contextWith(validPluginConfig()));
+    expect(dataStreamsAccess(config)).toEqual({
+      host: DATASTREAMS.HOSTS.testnet,
+      userId: 'ds-user-uuid',
+      hmacSecret: 'ds-hmac-secret',
+    });
+    process.env.STELLAR_NETWORK = 'mainnet';
+    const mainnet = loadConfig(contextWith(validPluginConfig()));
+    expect(dataStreamsAccess(mainnet).host).toBe(DATASTREAMS.HOSTS.mainnet);
   });
 });

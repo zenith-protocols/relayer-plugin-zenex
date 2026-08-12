@@ -46,7 +46,7 @@ export interface ParsedRelayCall {
   feeRateBps: number;
   maximumFeeAtomic: bigint;
   feeExpiration: number;
-  feedId: number | null;
+  feedId: string | null;
   /** The client's round-tripped func; its tail is overwritten before any use. */
   func: xdr.HostFunction;
   /** The signed entries, decoded once at parse and forwarded as-is. */
@@ -58,15 +58,15 @@ export interface RelayPrepareRequest {
   calls: readonly string[];
   expirationLedger: number;
   maxFeeAmountAtomic: string;
-  /** Selects the market price on priced routes; ignored on `calls`. */
-  feedId?: number;
+  /** Data Streams feed id (bytes32 hex); selects the market price on priced routes, ignored on `calls`. */
+  feedId?: string;
 }
 
 /** A submit body after validation: the round-tripped func and signed entries, decoded. */
 export interface RelaySubmitRequest {
   func: xdr.HostFunction;
   auth: xdr.SorobanAuthorizationEntry[];
-  feedId?: number;
+  feedId?: string;
 }
 
 export interface RelayPreparedAuthEntry {

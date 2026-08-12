@@ -1,8 +1,8 @@
 # @zenith-protocols/relayer-plugin-zenex
 
 OpenZeppelin Relayer plugin for the Zenex transaction relay. It prepares and
-submits router transactions (auth discovery, Pyth Lazer price injection, fee
-enforcement) and delegates final submission to the embedded
+submits router transactions (auth discovery, Chainlink Data Streams report
+injection, fee enforcement) and delegates final submission to the embedded
 `@openzeppelin/relayer-plugin-channels` handler in-process. The package also
 ships `ZenexClient`, a typed client for the plugin's routes.
 
@@ -15,7 +15,8 @@ npm install @zenith-protocols/relayer-plugin-zenex
 - Node.js >= 20.19
 - An OpenZeppelin Relayer deployment (v1.4.0+) with Redis, a Stellar network
   config, and local signers for the fund and channel accounts
-- A Pyth Lazer access token entitled to the channel you configure
+- Chainlink Data Streams credentials (the portal's user ID and HMAC secret)
+  with access to the feeds you serve
 
 ## Installation & Setup
 
@@ -99,7 +100,7 @@ Then add the signers, relayers, and the plugin entry to your relayer's
           "feeRateBps": 30,
           "feeToken": { "contractId": "C...USDC", "decimals": 7 },
         },
-        "pythChannel": "fixed_rate@1000ms",
+        "xlmUsdFeedId": "0x000358cb12b1f5bbeca8b5b4666025a40b15520af1f82516ee2fb9a335055e9a",
       },
     },
   ],
@@ -109,8 +110,11 @@ Then add the signers, relayers, and the plugin entry to your relayer's
 Every key the plugin reads is validated for type and value; unrecognized keys
 are ignored, matching the channels plugin's config convention (requests, by
 contrast, are strictly validated — unknown body keys are rejected). There is
-no market map — clients supply `feedId` per request. `pythChannel` must match
-a channel the operator's Pyth token is entitled to. `feeRecipient` must be
+no market map — clients supply `feedId` (a Data Streams feed id, bytes32 hex)
+per request. `xlmUsdFeedId` is the XLM/USD stream the relay prices its fee
+conversion with; it must come from the same environment catalog as the network
+(`STELLAR_NETWORK` selects `api.testnet-dataengine.chain.link` or
+`api.dataengine.chain.link`). `feeRecipient` must be
 able to hold the fee token (for a SAC-wrapped asset like USDC, a `G...`
 recipient needs the trustline) — otherwise every relayed transaction fails at
 the fee transfer.
@@ -121,14 +125,15 @@ diagnostics.
 
 ### Configure Environment Variables
 
-These are **not settings invented for this plugin** — with one exception, they
+These are **not settings invented for this plugin** — with two exceptions, they
 are properties of the relayer deployment this plugin runs inside:
 
-| Variable            | Origin                                                                                                                                                                                                                                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `STELLAR_NETWORK`   | Required by the embedded channels code, which reads it from `process.env` on every call. Any channels-capable relayer deployment already sets it. This plugin reads the same variable (deliberately — a duplicated network setting that could disagree with channels would be a silent passphrase mismatch on the funds path). |
-| `FUND_RELAYER_ID`   | Same: required by the embedded channels code. Also names the relayer whose RPC passthrough carries this plugin's chain reads and whose address is the boot-fetched simulation source.                                                                                                                                          |
-| `PYTH_ACCESS_TOKEN` | The one variable this plugin adds. A secret, so it lives in env rather than `plugins[].config` (that block sits on disk and is readable/patchable through the relayer's plugin API).                                                                                                                                           |
+| Variable          | Origin                                                                                                                                                                                                                                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `STELLAR_NETWORK` | Required by the embedded channels code, which reads it from `process.env` on every call. Any channels-capable relayer deployment already sets it. This plugin reads the same variable (deliberately — a duplicated network setting that could disagree with channels would be a silent passphrase mismatch on the funds path). |
+| `FUND_RELAYER_ID` | Same: required by the embedded channels code. Also names the relayer whose RPC passthrough carries this plugin's chain reads and whose address is the boot-fetched simulation source.                                                                                                                                          |
+| `DS_USER_ID`      | One of the two variables this plugin adds: the Chainlink Data Streams user ID (the portal's "API key" UUID), sent as the `Authorization` header value.                                                                                                                                                                         |
+| `DS_HMAC_SECRET`  | The other: the Data Streams HMAC signing secret. A secret, so both live in env rather than `plugins[].config` (that block sits on disk and is readable/patchable through the relayer's plugin API).                                                                                                                            |
 
 The embedded channels code also honors its own optional env vars
 (`PLUGIN_ADMIN_SECRET`, `LOCK_TTL_SECONDS`, fee tracking, timeouts, …) — see
@@ -222,7 +227,7 @@ const status = await client.getTransaction({ transactionId: submitted.transactio
 ```
 
 `prepareFill` / `prepareTryFill` take the same request with a required
-`feedId`. In relayer mode `getTransaction` uses the embedded channels surface
+`feedId` (a Data Streams feed id, bytes32 hex). In relayer mode `getTransaction` uses the embedded channels surface
 on the bare route; in direct mode it posts to the edge service's `/status`.
 
 ## Routes

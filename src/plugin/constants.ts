@@ -14,14 +14,16 @@ export const HTTP_STATUS = {
   SERVICE_UNAVAILABLE: 503,
 } as const;
 
-// Pyth Lazer access
-export const PYTH = {
-  LATEST_PRICE_URL: 'https://pyth-lazer-0.dourolabs.app/v1/latest_price',
+// Chainlink Data Streams access
+export const DATASTREAMS = {
+  // Feed ids are environment-scoped: the operator's `xlmUsdFeedId` and client feedIds must come from the same catalog as the host.
+  HOSTS: {
+    testnet: 'https://api.testnet-dataengine.chain.link',
+    mainnet: 'https://api.dataengine.chain.link',
+  },
+  LATEST_REPORT_PATH: '/api/v1/reports/latest',
   FETCH_TIMEOUT_MS: 5_000,
   RETRY_DELAY_MS: 250,
-  XLM_USD_FEED_ID: 23,
-  // Every property the on-chain price verifier requires in the signed payload; it rejects (error 781) a payload missing any.
-  LATEST_PRICE_PROPERTIES: ['price', 'bestBidPrice', 'bestAskPrice', 'exponent', 'confidence', 'feedUpdateTimestamp'],
 } as const;
 
 // Simulation-related defaults

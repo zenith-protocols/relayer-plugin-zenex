@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { validateAndParsePrepareRequest, validateAndParseSubmitRequest } from '../src/plugin/validation';
-import { makeAuthEntry, makeWrap, USER, ROUTER } from './helpers';
+import { makeAuthEntry, makeWrap, USER, ROUTER, XLM_FEED_ID } from './helpers';
 
 const VALID_PREPARE = {
   user: USER,
@@ -11,8 +11,16 @@ const VALID_PREPARE = {
 
 describe('validateAndParsePrepareRequest', () => {
   test('accepts a valid body and round-trips every field', () => {
-    const out = validateAndParsePrepareRequest({ ...VALID_PREPARE, feedId: 23 });
-    expect(out).toEqual({ ...VALID_PREPARE, feedId: 23 });
+    const out = validateAndParsePrepareRequest({ ...VALID_PREPARE, feedId: XLM_FEED_ID });
+    expect(out).toEqual({ ...VALID_PREPARE, feedId: XLM_FEED_ID });
+  });
+
+  test('normalizes an uppercase feedId to lowercase', () => {
+    const out = validateAndParsePrepareRequest({
+      ...VALID_PREPARE,
+      feedId: XLM_FEED_ID.toUpperCase().replace('0X', '0x'),
+    });
+    expect(out.feedId).toBe(XLM_FEED_ID);
   });
 
   test('accepts a contract user and omitted feedId', () => {
@@ -58,11 +66,14 @@ describe('validateAndParsePrepareRequest', () => {
     }
   );
 
-  test.each([-1, 1.5, '23', NaN])('rejects invalid feedId: %j', (feedId) => {
-    expect(() => validateAndParsePrepareRequest({ ...VALID_PREPARE, feedId })).toThrow(
-      '`feedId` must be a non-negative integer'
-    );
-  });
+  test.each([23, '23', '', XLM_FEED_ID.slice(2), XLM_FEED_ID.slice(0, -2), `${XLM_FEED_ID}ff`, '0xzz'])(
+    'rejects invalid feedId: %j',
+    (feedId) => {
+      expect(() => validateAndParsePrepareRequest({ ...VALID_PREPARE, feedId })).toThrow(
+        '`feedId` must be a 0x-prefixed 32-byte hex string'
+      );
+    }
+  );
 });
 
 describe('validateAndParseSubmitRequest', () => {
@@ -70,10 +81,10 @@ describe('validateAndParseSubmitRequest', () => {
   const funcXdr = wrap.toXDR('base64').toString();
 
   test('decodes func and auth from base64', () => {
-    const out = validateAndParseSubmitRequest({ func: funcXdr, auth: [funcXdrToAuthXdr()], feedId: 7 });
+    const out = validateAndParseSubmitRequest({ func: funcXdr, auth: [funcXdrToAuthXdr()], feedId: XLM_FEED_ID });
     expect(out.func.toXDR('base64')).toBe(funcXdr);
     expect(out.auth).toHaveLength(1);
-    expect(out.feedId).toBe(7);
+    expect(out.feedId).toBe(XLM_FEED_ID);
   });
 
   test('rejects unknown keys', () => {
@@ -100,9 +111,9 @@ describe('validateAndParseSubmitRequest', () => {
     );
   });
 
-  test('rejects fractional feedId', () => {
-    expect(() => validateAndParseSubmitRequest({ func: funcXdr, auth: [funcXdrToAuthXdr()], feedId: 1.5 })).toThrow(
-      '`feedId` must be a non-negative integer'
+  test('rejects a numeric (Lazer-era) feedId', () => {
+    expect(() => validateAndParseSubmitRequest({ func: funcXdr, auth: [funcXdrToAuthXdr()], feedId: 23 })).toThrow(
+      '`feedId` must be a 0x-prefixed 32-byte hex string'
     );
   });
 });

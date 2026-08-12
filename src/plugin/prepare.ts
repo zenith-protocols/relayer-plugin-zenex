@@ -122,7 +122,7 @@ export async function prepareRelayEntries(
   // Submit prices the real fee off its own simulation and overwrites this tail.
   const placeholderTail = { feeAmountAtomic: PLACEHOLDER_FEE_AMOUNT_ATOMIC, feeRecipient: user };
 
-  // Priced routes carry a real Lazer update; keeper = user so the fill reward round-trips.
+  // Priced routes carry a real Data Streams report; keeper = user so the fill reward round-trips.
   const func =
     priced && market !== null
       ? buildRouterWrap(policy.router, route, prefix, {
