@@ -90,14 +90,18 @@ describe('loadConfig', () => {
     expect(() => loadConfig(contextWith(config))).toThrow(`Invalid plugin config: ${field}`);
   });
 
-  test.each(['23', XLM_FEED_ID.slice(2), XLM_FEED_ID.slice(0, -2), `${XLM_FEED_ID}ff`, '0xzz'])(
-    'rejects a malformed xlmUsdFeedId: %j',
-    (xlmUsdFeedId) => {
-      const config = validPluginConfig();
-      config.xlmUsdFeedId = xlmUsdFeedId;
-      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: xlmUsdFeedId');
-    }
-  );
+  test.each([
+    '23',
+    XLM_FEED_ID.slice(2),
+    XLM_FEED_ID.slice(0, -2),
+    `${XLM_FEED_ID}ff`,
+    '0xzz',
+    `0x0002${XLM_FEED_ID.slice(6)}`, // non-V3 schema
+  ])('rejects a malformed xlmUsdFeedId: %j', (xlmUsdFeedId) => {
+    const config = validPluginConfig();
+    config.xlmUsdFeedId = xlmUsdFeedId;
+    expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: xlmUsdFeedId');
+  });
 
   test('normalizes an uppercase xlmUsdFeedId to lowercase', () => {
     const config = validPluginConfig();

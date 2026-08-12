@@ -66,14 +66,20 @@ describe('validateAndParsePrepareRequest', () => {
     }
   );
 
-  test.each([23, '23', '', XLM_FEED_ID.slice(2), XLM_FEED_ID.slice(0, -2), `${XLM_FEED_ID}ff`, '0xzz'])(
-    'rejects invalid feedId: %j',
-    (feedId) => {
-      expect(() => validateAndParsePrepareRequest({ ...VALID_PREPARE, feedId })).toThrow(
-        '`feedId` must be a 0x-prefixed 32-byte hex string'
-      );
-    }
-  );
+  test.each([
+    23,
+    '23',
+    '',
+    XLM_FEED_ID.slice(2),
+    XLM_FEED_ID.slice(0, -2),
+    `${XLM_FEED_ID}ff`,
+    '0xzz',
+    `0x0002${XLM_FEED_ID.slice(6)}`, // non-V3 schema
+  ])('rejects invalid feedId: %j', (feedId) => {
+    expect(() => validateAndParsePrepareRequest({ ...VALID_PREPARE, feedId })).toThrow(
+      '`feedId` must be a V3 (`0x0003…`) Data Streams feed id'
+    );
+  });
 });
 
 describe('validateAndParseSubmitRequest', () => {
@@ -113,7 +119,7 @@ describe('validateAndParseSubmitRequest', () => {
 
   test('rejects a numeric (Lazer-era) feedId', () => {
     expect(() => validateAndParseSubmitRequest({ func: funcXdr, auth: [funcXdrToAuthXdr()], feedId: 23 })).toThrow(
-      '`feedId` must be a 0x-prefixed 32-byte hex string'
+      '`feedId` must be a V3 (`0x0003…`) Data Streams feed id'
     );
   });
 });

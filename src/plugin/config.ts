@@ -10,8 +10,8 @@ import { DATASTREAMS, HTTP_STATUS } from './constants';
 import { DataStreamsAccess } from './pricing';
 import { RelayParseConfig } from './types';
 
-/** A Data Streams feed id: 0x-prefixed bytes32 hex. */
-export const FEED_ID_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+/** A V3-schema Data Streams feed id: 0x0003-prefixed bytes32 hex — the only schema the report decoder and the on-chain oracle accept. */
+export const FEED_ID_PATTERN = /^0x0003[0-9a-fA-F]{60}$/i;
 
 export interface ZenexConfig {
   /** The Router contract every relayed func must target. */

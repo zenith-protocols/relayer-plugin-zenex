@@ -49,7 +49,7 @@ export interface ZenexPrepareRequest {
   expirationLedger: number;
   /** Signed fee cap in the fee token's atomic units, as a decimal string */
   maxFeeAmountAtomic: string;
-  /** Chainlink Data Streams feed id (bytes32 hex) for the market price; required on priced routes, ignored on `calls` */
+  /** Chainlink Data Streams V3 feed id (`0x0003…` bytes32 hex) for the market price; required on priced routes, ignored on `calls` */
   feedId?: string;
 }
 
@@ -112,7 +112,7 @@ export interface ZenexSubmitRequest {
   func: string;
   /** The signed authorization entry XDRs, base64-encoded */
   auth: string[];
-  /** Chainlink Data Streams feed id (bytes32 hex) for the market price; required when the func is priced */
+  /** Chainlink Data Streams V3 feed id (`0x0003…` bytes32 hex) for the market price; required when the func is priced */
   feedId?: string;
 }
 

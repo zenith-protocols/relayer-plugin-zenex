@@ -110,7 +110,7 @@ Then add the signers, relayers, and the plugin entry to your relayer's
 Every key the plugin reads is validated for type and value; unrecognized keys
 are ignored, matching the channels plugin's config convention (requests, by
 contrast, are strictly validated — unknown body keys are rejected). There is
-no market map — clients supply `feedId` (a Data Streams feed id, bytes32 hex)
+no market map — clients supply `feedId` (a V3 Data Streams feed id: `0x0003…` bytes32 hex)
 per request. `xlmUsdFeedId` is the XLM/USD stream the relay prices its fee
 conversion with; it must come from the same environment catalog as the network
 (`STELLAR_NETWORK` selects `api.testnet-dataengine.chain.link` or

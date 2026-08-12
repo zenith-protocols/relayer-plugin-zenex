@@ -36,7 +36,7 @@ function requestBody(params: unknown, allowedKeys: readonly string[]): Record<st
 function validateFeedId(feedId: unknown): string | undefined {
   if (feedId === undefined) return undefined;
   if (typeof feedId !== 'string' || !FEED_ID_PATTERN.test(feedId)) {
-    invalidParams('`feedId` must be a 0x-prefixed 32-byte hex string');
+    invalidParams('`feedId` must be a V3 (`0x0003…`) Data Streams feed id: 0x-prefixed 32-byte hex');
   }
   return feedId.toLowerCase();
 }
