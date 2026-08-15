@@ -29,6 +29,8 @@ export interface ZenexConfig {
   fundRelayerId: string;
   dsUserId: string;
   dsHmacSecret: string;
+  /** The Data Streams REST host: `DS_API_HOST` when set, the network's host otherwise. */
+  dsApiHost: string;
 }
 
 // Reports only the offending field, never its value — plugin error messages serialize back to callers.
@@ -50,6 +52,14 @@ function requireEnv(name: string): string {
     });
   }
   return v.trim();
+}
+
+function envInvalid(name: string): never {
+  throw pluginError(`Invalid environment variable: ${name}`, {
+    code: 'CONFIG_INVALID',
+    status: HTTP_STATUS.INTERNAL_SERVER_ERROR,
+    details: { name },
+  });
 }
 
 function requireConfigString(value: unknown, field: string): string {
@@ -103,7 +113,44 @@ export function loadConfig(context: PluginContext): ZenexConfig {
     fundRelayerId: requireEnv('FUND_RELAYER_ID'),
     dsUserId: requireEnv('DS_USER_ID'),
     dsHmacSecret: requireEnv('DS_HMAC_SECRET'),
+    dsApiHost: dataStreamsHost(networkRaw),
   };
+}
+
+function parseUrl(value: string): URL | null {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The Data Streams REST host: `DS_API_HOST` when set, the network's host otherwise. The override
+ * exists because the Data Streams environment and the Stellar network are separable — a testnet
+ * relayer settling against a shadow verifier that accepts mainnet DON reports must pull those
+ * reports from the mainnet endpoint.
+ *
+ * Requirements are deliberately narrow, because the HMAC credentials ride on every request to
+ * whatever this names: https only (no cleartext), no embedded credentials, and no query or
+ * fragment (the fetch owns the query string). A trailing slash is trimmed so the joined
+ * `${host}${path}` stays single-slashed. Anything else fails closed at load.
+ */
+function dataStreamsHost(network: ZenexConfig['network']): string {
+  const raw = (process.env.DS_API_HOST ?? '').trim();
+  if (raw === '') return DATASTREAMS.HOSTS[network];
+  const url = parseUrl(raw);
+  if (
+    url === null ||
+    url.protocol !== 'https:' ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
+    envInvalid('DS_API_HOST');
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
 }
 
 // Normalized to lowercase so feed comparisons (market vs XLM/USD) are plain equality.
@@ -113,10 +160,10 @@ function requireFeedId(value: unknown): string {
   return feedId.toLowerCase();
 }
 
-/** The Data Streams endpoint (by network) and credentials the pricing calls use. */
+/** The Data Streams endpoint and credentials the pricing calls use. */
 export function dataStreamsAccess(config: ZenexConfig): DataStreamsAccess {
   return {
-    host: DATASTREAMS.HOSTS[config.network],
+    host: config.dsApiHost,
     userId: config.dsUserId,
     hmacSecret: config.dsHmacSecret,
   };

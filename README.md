@@ -112,9 +112,9 @@ are ignored, matching the channels plugin's config convention (requests, by
 contrast, are strictly validated — unknown body keys are rejected). There is
 no market map — clients supply `feedId` (a V3 Data Streams feed id: `0x0003…` bytes32 hex)
 per request. `xlmUsdFeedId` is the XLM/USD stream the relay prices its fee
-conversion with; it must come from the same environment catalog as the network
+conversion with; it must come from the same environment catalog as the host
 (`STELLAR_NETWORK` selects `api.testnet-dataengine.chain.link` or
-`api.dataengine.chain.link`). `feeRecipient` must be
+`api.dataengine.chain.link`, unless `DS_API_HOST` overrides it). `feeRecipient` must be
 able to hold the fee token (for a SAC-wrapped asset like USDC, a `G...`
 recipient needs the trustline) — otherwise every relayed transaction fails at
 the fee transfer.
@@ -125,15 +125,16 @@ diagnostics.
 
 ### Configure Environment Variables
 
-These are **not settings invented for this plugin** — with two exceptions, they
-are properties of the relayer deployment this plugin runs inside:
+These are **not settings invented for this plugin** — with the `DS_*` exceptions,
+they are properties of the relayer deployment this plugin runs inside:
 
-| Variable          | Origin                                                                                                                                                                                                                                                                                                                         |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `STELLAR_NETWORK` | Required by the embedded channels code, which reads it from `process.env` on every call. Any channels-capable relayer deployment already sets it. This plugin reads the same variable (deliberately — a duplicated network setting that could disagree with channels would be a silent passphrase mismatch on the funds path). |
-| `FUND_RELAYER_ID` | Same: required by the embedded channels code. Also names the relayer whose RPC passthrough carries this plugin's chain reads and whose address is the boot-fetched simulation source.                                                                                                                                          |
-| `DS_USER_ID`      | One of the two variables this plugin adds: the Chainlink Data Streams user ID (the portal's "API key" UUID), sent as the `Authorization` header value.                                                                                                                                                                         |
-| `DS_HMAC_SECRET`  | The other: the Data Streams HMAC signing secret. A secret, so both live in env rather than `plugins[].config` (that block sits on disk and is readable/patchable through the relayer's plugin API).                                                                                                                            |
+| Variable          | Origin                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STELLAR_NETWORK` | Required by the embedded channels code, which reads it from `process.env` on every call. Any channels-capable relayer deployment already sets it. This plugin reads the same variable (deliberately — a duplicated network setting that could disagree with channels would be a silent passphrase mismatch on the funds path).                                                                                                                                                |
+| `FUND_RELAYER_ID` | Same: required by the embedded channels code. Also names the relayer whose RPC passthrough carries this plugin's chain reads and whose address is the boot-fetched simulation source.                                                                                                                                                                                                                                                                                         |
+| `DS_USER_ID`      | Added by this plugin: the Chainlink Data Streams user ID (the portal's "API key" UUID), sent as the `Authorization` header value.                                                                                                                                                                                                                                                                                                                                             |
+| `DS_HMAC_SECRET`  | Added by this plugin: the Data Streams HMAC signing secret. Both are secrets, so they live in env rather than `plugins[].config` (that block sits on disk and is readable/patchable through the relayer's plugin API).                                                                                                                                                                                                                                                        |
+| `DS_API_HOST`     | Optional, added by this plugin: overrides the Data Streams host `STELLAR_NETWORK` would select. Set it when the Data Streams environment and the Stellar network differ — settling on Stellar testnet against a shadow verifier that accepts mainnet DON reports means fetching those reports from `https://api.dataengine.chain.link` with mainnet credentials. Must be an `https://` URL with no embedded credentials, query, or fragment; anything else fails config load. |
 
 The embedded channels code also honors its own optional env vars
 (`PLUGIN_ADMIN_SECRET`, `LOCK_TTL_SECONDS`, fee tracking, timeouts, …) — see

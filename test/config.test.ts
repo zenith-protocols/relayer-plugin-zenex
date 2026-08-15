@@ -6,7 +6,8 @@ import { DATASTREAMS } from '../src/plugin/constants';
 import { FEE_RECIPIENT, FEE_TOKEN, ROUTER, XLM_FEED_ID } from './helpers';
 
 const ENV_KEYS = ['STELLAR_NETWORK', 'FUND_RELAYER_ID', 'DS_USER_ID', 'DS_HMAC_SECRET'] as const;
-const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
+const OPTIONAL_ENV_KEYS = ['DS_API_HOST'] as const;
+const savedEnv = Object.fromEntries([...ENV_KEYS, ...OPTIONAL_ENV_KEYS].map((key) => [key, process.env[key]]));
 
 function validPluginConfig(): Record<string, unknown> {
   return {
@@ -26,10 +27,11 @@ beforeEach(() => {
   process.env.FUND_RELAYER_ID = 'channels-fund';
   process.env.DS_USER_ID = 'ds-user-uuid';
   process.env.DS_HMAC_SECRET = 'ds-hmac-secret';
+  delete process.env.DS_API_HOST;
 });
 
 afterAll(() => {
-  for (const key of ENV_KEYS) {
+  for (const key of [...ENV_KEYS, ...OPTIONAL_ENV_KEYS]) {
     if (savedEnv[key] === undefined) delete process.env[key];
     else process.env[key] = savedEnv[key];
   }
@@ -50,6 +52,7 @@ describe('loadConfig', () => {
       fundRelayerId: 'channels-fund',
       dsUserId: 'ds-user-uuid',
       dsHmacSecret: 'ds-hmac-secret',
+      dsApiHost: DATASTREAMS.HOSTS.testnet,
     });
   });
 
@@ -136,6 +139,46 @@ describe('relayParseConfig', () => {
       router: ROUTER,
       feeToken: { contractId: FEE_TOKEN, decimals: 7, feeRateBps: 30 },
     });
+  });
+});
+
+describe('DS_API_HOST', () => {
+  test('overrides the network-derived host — mainnet reports while settling on testnet', () => {
+    process.env.DS_API_HOST = DATASTREAMS.HOSTS.mainnet;
+    const config = loadConfig(contextWith(validPluginConfig()));
+    expect(config.network).toBe('testnet');
+    expect(config.networkPassphrase).toBe(Networks.TESTNET);
+    expect(dataStreamsAccess(config).host).toBe(DATASTREAMS.HOSTS.mainnet);
+  });
+
+  test.each([undefined, '', '   '])('falls back to the network-derived host when unset: %j', (value) => {
+    if (value === undefined) delete process.env.DS_API_HOST;
+    else process.env.DS_API_HOST = value;
+    expect(loadConfig(contextWith(validPluginConfig())).dsApiHost).toBe(DATASTREAMS.HOSTS.testnet);
+  });
+
+  test.each([
+    ['  https://ds.example.com  ', 'https://ds.example.com'],
+    ['https://ds.example.com/', 'https://ds.example.com'],
+    ['https://ds.example.com///', 'https://ds.example.com'],
+    ['https://ds.example.com:8443/proxy/', 'https://ds.example.com:8443/proxy'],
+  ])('trims and normalizes %j', (value, expected) => {
+    process.env.DS_API_HOST = value;
+    expect(loadConfig(contextWith(validPluginConfig())).dsApiHost).toBe(expected);
+  });
+
+  test.each([
+    'api.dataengine.chain.link', // no scheme
+    'http://api.dataengine.chain.link', // credentials would ride in cleartext
+    'ftp://api.dataengine.chain.link',
+    'https://',
+    'not a url',
+    'https://ds.example.com?feedID=1', // the caller owns the query string
+    'https://ds.example.com#frag',
+    'https://user:pass@ds.example.com',
+  ])('rejects %j', (value) => {
+    process.env.DS_API_HOST = value;
+    expect(() => loadConfig(contextWith(validPluginConfig()))).toThrow('Invalid environment variable: DS_API_HOST');
   });
 });
 

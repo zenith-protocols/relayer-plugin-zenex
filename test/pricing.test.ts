@@ -128,6 +128,15 @@ describe('fetchMarketUpdate', () => {
     expect(init.headers['X-Authorization-Signature-SHA256']).toBe(expected);
   });
 
+  test('fetches from the access host verbatim, whatever DS_API_HOST resolved it to', async () => {
+    const overridden = { ...ACCESS, host: 'https://ds-proxy.lan:8443/ds' };
+    fetchMock.mockResolvedValueOnce(reportResponse(XLM_FEED_ID, encodeFullReport(XLM_BODY)));
+    await fetchMarketUpdate(XLM_FEED_ID, overridden);
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      `${overridden.host}${DATASTREAMS.LATEST_REPORT_PATH}?feedID=${XLM_FEED_ID}`
+    );
+  });
+
   test('maps an HTTP failure to PRICE_UNAVAILABLE', async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) });
     await expect(fetchMarketUpdate(XLM_FEED_ID, ACCESS)).rejects.toMatchObject({

@@ -17,6 +17,7 @@ export const HTTP_STATUS = {
 // Chainlink Data Streams access
 export const DATASTREAMS = {
   // Feed ids are environment-scoped: the operator's `xlmUsdFeedId` and client feedIds must come from the same catalog as the host.
+  // The default host per Stellar network; `DS_API_HOST` overrides it (see config.ts).
   HOSTS: {
     testnet: 'https://api.testnet-dataengine.chain.link',
     mainnet: 'https://api.dataengine.chain.link',
