@@ -107,17 +107,20 @@ Then add the signers, relayers, and the plugin entry to your relayer's
 }
 ```
 
-Every key the plugin reads is validated for type and value; unrecognized keys
-are ignored, matching the channels plugin's config convention (requests, by
-contrast, are strictly validated — unknown body keys are rejected). There is
-no market map — clients supply `feedId` (a V3 Data Streams feed id: `0x0003…` bytes32 hex)
-per request. `xlmUsdFeedId` is the XLM/USD stream the relay prices its fee
-conversion with; it must come from the same environment catalog as the host
-(`STELLAR_NETWORK` selects `api.testnet-dataengine.chain.link` or
-`api.dataengine.chain.link`, unless `DS_API_HOST` overrides it). `feeRecipient` must be
-able to hold the fee token (for a SAC-wrapped asset like USDC, a `G...`
-recipient needs the trustline) — otherwise every relayed transaction fails at
-the fee transfer.
+Every key the plugin reads is validated for type and value, and an unrecognized
+key is a hard config error rather than something silently ignored: the embedded
+channels code reads this same `plugins[].config` block for its own per-fund-relayer
+overrides and tolerates what it does not recognize, so a channels-only key
+(`fundRelayers`, say) or a plain typo has to fail loudly here instead of sitting
+in the file doing nothing. Request bodies are strict the same way — unknown body
+keys are rejected. There is no market map — clients supply `feedId` (a V3 Data
+Streams feed id: `0x0003…` bytes32 hex) per request. `xlmUsdFeedId` is the
+XLM/USD stream the relay prices its fee conversion with; it must come from the
+same environment catalog as the host (`STELLAR_NETWORK` selects
+`api.testnet-dataengine.chain.link` or `api.dataengine.chain.link`, unless
+`DS_API_HOST` overrides it). `feeRecipient` must be able to hold the fee token
+(for a SAC-wrapped asset like USDC, a `G...` recipient needs the trustline) —
+otherwise every relayed transaction fails at the fee transfer.
 
 Keep `emit_logs` off outside development: the plugin envelope returns emitted
 logs to the caller in `metadata.logs`, which includes raw simulation
