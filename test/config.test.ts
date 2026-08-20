@@ -131,67 +131,12 @@ describe('loadConfig', () => {
     expect(loaded.fundRelayerId).toBe('channels-fund');
   });
 
-  describe('session block', () => {
-    function validSessionBlock(): Record<string, unknown> {
-      return {
-        policy: 'C'.padEnd(56, 'A'),
-        ed25519Verifier: 'C'.padEnd(56, 'B'),
-        ruleName: 'zenex-session',
-        maxDurationLedgers: 17_280,
-        markets: [{ trading: 'C'.padEnd(56, 'D'), collateral: FEE_TOKEN }],
-      };
-    }
-
-    test('is optional — absent means no session policy', () => {
-      expect(loadConfig(contextWith(validPluginConfig())).session).toBeUndefined();
-    });
-
-    test('loads a valid block and projects it into the parse policy', () => {
-      const config = validPluginConfig();
-      config.session = validSessionBlock();
-      const loaded = loadConfig(contextWith(config));
-      expect(loaded.session).toEqual(validSessionBlock());
-      expect(relayParseConfig(loaded).session).toEqual(validSessionBlock());
-    });
-
-    test('rejects an unknown session key', () => {
-      const config = validPluginConfig();
-      config.session = { ...validSessionBlock(), verifier: 'typo' };
-      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session.verifier');
-    });
-
-    test.each(['policy', 'ed25519Verifier', 'ruleName'] as const)('rejects a missing session.%s', (field) => {
-      const config = validPluginConfig();
-      const session = validSessionBlock();
-      delete session[field];
-      config.session = session;
-      expect(() => loadConfig(contextWith(config))).toThrow(`Invalid plugin config: session.${field}`);
-    });
-
-    test.each([undefined, '17280', 0, -1, 1.5, 0x1_0000_0000])('rejects maxDurationLedgers: %j', (value) => {
-      const config = validPluginConfig();
-      config.session = { ...validSessionBlock(), maxDurationLedgers: value };
-      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session.maxDurationLedgers');
-    });
-
-    test.each([undefined, [], 'markets'])('rejects markets: %j', (value) => {
-      const config = validPluginConfig();
-      config.session = { ...validSessionBlock(), markets: value };
-      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session.markets');
-    });
-
-    test('rejects a market entry with an unknown key', () => {
-      const config = validPluginConfig();
-      config.session = { ...validSessionBlock(), markets: [{ trading: ROUTER, collateral: FEE_TOKEN, vault: ROUTER }] };
-      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session.markets[0].vault');
-    });
-
-    test('rejects a market entry missing its collateral', () => {
-      const config = validPluginConfig();
-      config.session = { ...validSessionBlock(), markets: [{ trading: ROUTER }] };
-      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session.markets[0].collateral');
-    });
+  test('rejects the retired session block as an unknown key', () => {
+    const config = validPluginConfig();
+    config.session = { policy: ROUTER };
+    expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session');
   });
+
 });
 
 describe('relayParseConfig', () => {

@@ -15,7 +15,6 @@ import {
   parseCallOutcome,
   PLACEHOLDER_FEE_AMOUNT_ATOMIC,
 } from './parse';
-import { validateSessionRuleCalls, validateSessionRuleExpiries } from './session';
 import { simulateDiscovery } from './simulation';
 import {
   RelayParseConfig,
@@ -100,10 +99,6 @@ export async function prepareRelayEntries(
 ): Promise<RelayPrepareResult> {
   const { user, expirationLedger } = request;
   const decoded = decodeCallXdrs(request.calls);
-  // Session-rule calls get the full structural policy (session.ts) before the
-  // relay spends a simulation on them; their expiry window is checked against
-  // the simulation's live ledger below. Non-session calls pass through untouched.
-  const sessionExpiries = validateSessionRuleCalls(decoded, user, policy);
 
   const priced = route !== 'calls';
   if (route === 'fill' && decoded[0]!.func !== 'create_order') {
@@ -154,10 +149,6 @@ export async function prepareRelayEntries(
         },
       }
     );
-  }
-  if (sessionExpiries.length > 0) {
-    // Non-empty expiries imply policy.session — the structural pass fails closed without it.
-    validateSessionRuleExpiries(sessionExpiries, simulation.ledger, policy.session!.maxDurationLedgers);
   }
 
   const expectedRoot = expectedRootFunctionHex(func);

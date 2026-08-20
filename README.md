@@ -101,15 +101,6 @@ Then add the signers, relayers, and the plugin entry to your relayer's
           "feeToken": { "contractId": "C...USDC", "decimals": 7 },
         },
         "xlmUsdFeedId": "0x000358cb12b1f5bbeca8b5b4666025a40b15520af1f82516ee2fb9a335055e9a",
-        // Optional: the exact session rule the relay will co-sign (see
-        // "Session-rule validation"). Absent means session calls are refused.
-        "session": {
-          "policy": "C...SESSION_POLICY",
-          "ed25519Verifier": "C...ED25519_VERIFIER",
-          "ruleName": "zenex-session",
-          "maxDurationLedgers": 17280,
-          "markets": [{ "trading": "C...TRADING", "collateral": "C...USDC" }],
-        },
       },
     },
   ],
@@ -284,35 +275,14 @@ surface, reachable only with the relayer API key.
 Public authentication and CORS are owned by the Worker; this plugin trusts its
 caller.
 
-## Session-rule validation
+## Batch calls pass through
 
-Batch calls generally pass through unvalidated — Soroban auth is their gate:
-the user signed exactly what executes. Smart-account session rules are the
-exception, because auth only proves the user signed, not that what they signed
-is the rule the app builds. A wallet tricked into signing a crafted
-`add_context_rule` would otherwise get it co-signed and sponsored by the relay.
-
-So any batch call named `add_context_rule` or `remove_context_rule` (on every
-prepare route and on submit) must match the configured `session` block exactly,
-or the request is refused with `INVALID_SESSION_RULE` (400):
-
-- the call targets the requesting user's own smart account (a `C...` user);
-- `add_context_rule` carries the exact frontend ABI: a `Default` context, the
-  configured `ruleName`, a concrete u32 `valid_until` (a "no expiry" void is
-  refused), exactly one `External` signer through the configured
-  `ed25519Verifier` with a 32-byte key, and exactly one installed policy — the
-  configured `policy` contract with SessionConfig params encoding one
-  configured market capability (`allowed_contracts` =
-  `[trading, collateral, router]`, `allowed_transfer_to` = that trading
-  contract);
-- the rule's `valid_until` lands inside `(currentLedger, currentLedger +
-maxDurationLedgers]` of the simulation's live ledger, else
-  `SESSION_EXPIRY_OUT_OF_WINDOW` (422);
-- `remove_context_rule` takes one positive u32 (rule 0 — the primary signer
-  rule — cannot be removed through the relay).
-
-Without a `session` config block the relay fails closed: session calls are
-refused outright, non-session calls keep their exact behavior.
+Batch calls pass through unvalidated — Soroban auth is their gate: the user
+signed exactly what executes, and the relay fee (paid by the user in the fee
+token) prices the resources. The relay validates its own transaction shape
+(the Router `*_with_fee` wrap, the fee token, the fee cap) and nothing about
+the inner calls' targets or arguments. Smart-account mutations such as
+`add_context_rule` are the user's own business on the user's own account.
 
 ## Deployment constraints
 

@@ -8,7 +8,7 @@ import { Networks } from '@stellar/stellar-sdk';
 import { pluginError, PluginContext } from '@openzeppelin/relayer-sdk';
 import { DATASTREAMS, HTTP_STATUS } from './constants';
 import { DataStreamsAccess } from './pricing';
-import { RelayParseConfig, SessionRulePolicy } from './types';
+import { RelayParseConfig } from './types';
 
 /** A V3-schema Data Streams feed id: 0x0003-prefixed bytes32 hex — the only schema the report decoder and the on-chain oracle accept. */
 export const FEED_ID_PATTERN = /^0x0003[0-9a-fA-F]{60}$/i;
@@ -23,8 +23,6 @@ export interface ZenexConfig {
   feeTokenDecimals: number;
   /** The Data Streams XLM/USD feed id (bytes32 hex) used for fee conversion. */
   xlmUsdFeedId: string;
-  /** Session-rule co-signing policy; absent means session calls are refused (fail closed). */
-  session?: SessionRulePolicy;
   network: 'testnet' | 'mainnet';
   networkPassphrase: string;
   /** Carries every chain read; its address is the simulation source. */
@@ -79,44 +77,7 @@ function rejectUnknownKeys(value: Record<string, unknown>, allowed: readonly str
 }
 
 /** Soroban ledger sequences are u32s. */
-const MAX_U32 = 0xffffffff;
 
-/**
- * The optional `session` block: the exact session-rule shape the relay
- * co-signs (see session.ts). Absent means session calls are refused outright.
- */
-function sessionRulePolicy(value: unknown): SessionRulePolicy | undefined {
-  if (value === undefined) return undefined;
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) configInvalid('session');
-  const session = value as Record<string, unknown>;
-  rejectUnknownKeys(session, ['policy', 'ed25519Verifier', 'ruleName', 'maxDurationLedgers', 'markets'], 'session');
-  const maxDurationLedgers = session.maxDurationLedgers;
-  if (
-    typeof maxDurationLedgers !== 'number' ||
-    !Number.isInteger(maxDurationLedgers) ||
-    maxDurationLedgers <= 0 ||
-    maxDurationLedgers > MAX_U32
-  ) {
-    configInvalid('session.maxDurationLedgers');
-  }
-  if (!Array.isArray(session.markets) || session.markets.length === 0) configInvalid('session.markets');
-  const markets = session.markets.map((entry: unknown, index) => {
-    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) configInvalid(`session.markets[${index}]`);
-    const market = entry as Record<string, unknown>;
-    rejectUnknownKeys(market, ['trading', 'collateral'], `session.markets[${index}]`);
-    return {
-      trading: requireConfigString(market.trading, `session.markets[${index}].trading`),
-      collateral: requireConfigString(market.collateral, `session.markets[${index}].collateral`),
-    };
-  });
-  return {
-    policy: requireConfigString(session.policy, 'session.policy'),
-    ed25519Verifier: requireConfigString(session.ed25519Verifier, 'session.ed25519Verifier'),
-    ruleName: requireConfigString(session.ruleName, 'session.ruleName'),
-    maxDurationLedgers,
-    markets,
-  };
-}
 
 /**
  * Load configuration from plugins[].config and environment variables
@@ -125,7 +86,7 @@ export function loadConfig(context: PluginContext): ZenexConfig {
   const config = (context.config ?? {}) as Record<string, unknown>;
   const fees = (config.fees ?? {}) as Record<string, unknown>;
   const feeToken = (fees.feeToken ?? {}) as Record<string, unknown>;
-  rejectUnknownKeys(config, ['router', 'feeRecipient', 'fees', 'xlmUsdFeedId', 'session'], '');
+  rejectUnknownKeys(config, ['router', 'feeRecipient', 'fees', 'xlmUsdFeedId'], '');
   rejectUnknownKeys(fees, ['feeRateBps', 'feeToken'], 'fees');
   rejectUnknownKeys(feeToken, ['contractId', 'decimals'], 'fees.feeToken');
   const feeRateBps = fees.feeRateBps;
@@ -150,7 +111,6 @@ export function loadConfig(context: PluginContext): ZenexConfig {
     feeTokenContractId: requireConfigString(feeToken.contractId, 'fees.feeToken.contractId'),
     feeTokenDecimals: 7,
     xlmUsdFeedId: requireFeedId(config.xlmUsdFeedId),
-    session: sessionRulePolicy(config.session),
     network: networkRaw,
     networkPassphrase: networkRaw === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET,
     fundRelayerId: requireEnv('FUND_RELAYER_ID'),
@@ -233,6 +193,5 @@ export function relayParseConfig(config: ZenexConfig): RelayParseConfig {
       decimals: config.feeTokenDecimals,
       feeRateBps: config.feeRateBps,
     },
-    session: config.session,
   };
 }
