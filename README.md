@@ -137,7 +137,7 @@ they are properties of the relayer deployment this plugin runs inside:
 | `FUND_RELAYER_ID` | Same: required by the embedded channels code. Also names the relayer whose RPC passthrough carries this plugin's chain reads and whose address is the boot-fetched simulation source.                                                                                                                                                                                                                                                                                         |
 | `DS_USER_ID`      | Added by this plugin: the Chainlink Data Streams user ID (the portal's "API key" UUID), sent as the `Authorization` header value.                                                                                                                                                                                                                                                                                                                                             |
 | `DS_HMAC_SECRET`  | Added by this plugin: the Data Streams HMAC signing secret. Both are secrets, so they live in env rather than `plugins[].config` (that block sits on disk and is readable/patchable through the relayer's plugin API).                                                                                                                                                                                                                                                        |
-| `DS_API_HOST`     | Optional, added by this plugin: overrides the Data Streams host `STELLAR_NETWORK` would select. Set it when the Data Streams environment and the Stellar network differ — settling on Stellar testnet against a shadow verifier that accepts mainnet DON reports means fetching those reports from `https://api.dataengine.chain.link` with mainnet credentials. Must be an `https://` URL with no embedded credentials, query, or fragment; anything else fails config load. |
+| `DS_API_HOST`     | Optional, added by this plugin: overrides the Data Streams host `STELLAR_NETWORK` would select. Set it when the Data Streams environment and the Stellar network differ — settling on Stellar testnet against a shadow verifier that accepts mainnet DON reports means fetching those reports from `https://api.dataengine.chain.link` with mainnet credentials. Must be an `https://` URL with no embedded credentials, query, or fragment — with one exception for local mocks: cleartext `http://` is accepted when the host is loopback (`localhost`, `127.0.0.0/8`) or RFC1918-private IPv4 (`10/8`, `172.16/12`, `192.168/16`). Anything else fails config load. |
 
 The embedded channels code also honors its own optional env vars
 (`PLUGIN_ADMIN_SECRET`, `LOCK_TTL_SECONDS`, fee tracking, timeouts, …) — see
@@ -277,12 +277,20 @@ caller.
 
 ## Batch calls pass through
 
-Batch calls pass through unvalidated — Soroban auth is their gate: the user
-signed exactly what executes, and the relay fee (paid by the user in the fee
-token) prices the resources. The relay validates its own transaction shape
-(the Router `*_with_fee` wrap, the fee token, the fee cap) and nothing about
-the inner calls' targets or arguments. Smart-account mutations such as
-`add_context_rule` are the user's own business on the user's own account.
+Batch calls pass through unvalidated. Soroban auth is their gate: the user's
+signature covers the inner calls together with the fee constraints — the call
+vector, the fee token, the fee cap, and the fee expiration ledger (the Router
+auth projection, args 0/2/3/4). Within those constraints the relay fills the
+tail it must compute itself: the actual fee amount (rejected if it exceeds the
+signed cap), the fee recipient, the keeper, and the price report. So the user
+does not sign the final wrapper byte-for-byte; they sign what the calls do and
+the most they can be charged for it.
+
+The relay validates its own transaction shape (the Router `*_with_fee` entry
+points at exact arity, the configured fee token, the fee envelope) and nothing
+about the inner calls' targets or arguments — the user pays the relay fee for
+whatever they submit. Smart-account mutations such as `add_context_rule` are
+the user's own business on the user's own account.
 
 ## Deployment constraints
 
@@ -295,11 +303,12 @@ the inner calls' targets or arguments. Smart-account mutations such as
   (`tx_bad_seq` / duplicate submits). Either give this plugin a disjoint
   channel relayer pool, or do not deploy the standalone channels plugin
   alongside it.
-- **Channels' per-fund-relayer overrides pass through.** The embedded channels
-  code reads `fundRelayers` from this plugin's config block (`context.config`
-  is handed over untouched), so per-fund-relayer overrides — dynamic fees,
-  timeouts, transaction params — work here exactly as they do in a standalone
-  channels deployment.
+- **Channels' per-fund-relayer overrides are not configurable here.** The
+  embedded channels code reads `context.config`, but this plugin parses that
+  block strictly and rejects every key it does not define — `fundRelayers`
+  included — so channels-only overrides (dynamic fees, timeouts, transaction
+  params) cannot be passed through it. A stray override fails config load
+  loudly instead of being silently ignored.
 
 ## License
 
