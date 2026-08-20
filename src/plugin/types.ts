@@ -33,11 +33,31 @@ export type RouterWrapTail = {
   priceUpdate?: Uint8Array;
 };
 
+/**
+ * Session-rule policy: the only `add_context_rule` / `remove_context_rule`
+ * shape the relay will co-sign (see session.ts). Absent means session calls
+ * are refused outright — never passed through unvalidated.
+ */
+export type SessionRulePolicy = {
+  /** The session-policy contract every rule must install — exactly this one, nothing else. */
+  policy: string;
+  /** The verifier contract the rule's single External signer must ride through. */
+  ed25519Verifier: string;
+  /** The exact rule name the app registers. */
+  ruleName: string;
+  /** Upper bound on a rule's lifetime, in ledgers ahead of the live ledger. */
+  maxDurationLedgers: number;
+  /** Market capabilities a rule may encode: a Trading contract and its collateral token. */
+  markets: readonly { trading: string; collateral: string }[];
+};
+
 // Submit-side policy: the configured Router at exact arity and the configured fee token.
-// No inner-call allowlist — Soroban auth enforces on-chain.
+// Inner calls pass through except session rules, which session.ts validates structurally —
+// Soroban auth enforces everything else on-chain.
 export type RelayParseConfig = {
   router: string;
   feeToken: { contractId: string; decimals: number; feeRateBps: number };
+  session?: SessionRulePolicy;
 };
 
 export interface ParsedRelayCall {
@@ -47,6 +67,11 @@ export interface ParsedRelayCall {
   maximumFeeAtomic: bigint;
   feeExpiration: number;
   feedId: string | null;
+  /**
+   * Present when the batch installs session rules: their `valid_until` ledgers
+   * and the configured window, checked against the live ledger after simulation.
+   */
+  sessionRules: { expiries: readonly number[]; maxDurationLedgers: number } | null;
   /** The client's round-tripped func; its tail is overwritten before any use. */
   func: xdr.HostFunction;
   /** The signed entries, decoded once at parse and forwarded as-is. */

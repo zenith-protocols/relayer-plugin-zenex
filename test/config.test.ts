@@ -130,6 +130,68 @@ describe('loadConfig', () => {
     expect(loaded.router).toBe(ROUTER);
     expect(loaded.fundRelayerId).toBe('channels-fund');
   });
+
+  describe('session block', () => {
+    function validSessionBlock(): Record<string, unknown> {
+      return {
+        policy: 'C'.padEnd(56, 'A'),
+        ed25519Verifier: 'C'.padEnd(56, 'B'),
+        ruleName: 'zenex-session',
+        maxDurationLedgers: 17_280,
+        markets: [{ trading: 'C'.padEnd(56, 'D'), collateral: FEE_TOKEN }],
+      };
+    }
+
+    test('is optional — absent means no session policy', () => {
+      expect(loadConfig(contextWith(validPluginConfig())).session).toBeUndefined();
+    });
+
+    test('loads a valid block and projects it into the parse policy', () => {
+      const config = validPluginConfig();
+      config.session = validSessionBlock();
+      const loaded = loadConfig(contextWith(config));
+      expect(loaded.session).toEqual(validSessionBlock());
+      expect(relayParseConfig(loaded).session).toEqual(validSessionBlock());
+    });
+
+    test('rejects an unknown session key', () => {
+      const config = validPluginConfig();
+      config.session = { ...validSessionBlock(), verifier: 'typo' };
+      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session.verifier');
+    });
+
+    test.each(['policy', 'ed25519Verifier', 'ruleName'] as const)('rejects a missing session.%s', (field) => {
+      const config = validPluginConfig();
+      const session = validSessionBlock();
+      delete session[field];
+      config.session = session;
+      expect(() => loadConfig(contextWith(config))).toThrow(`Invalid plugin config: session.${field}`);
+    });
+
+    test.each([undefined, '17280', 0, -1, 1.5, 0x1_0000_0000])('rejects maxDurationLedgers: %j', (value) => {
+      const config = validPluginConfig();
+      config.session = { ...validSessionBlock(), maxDurationLedgers: value };
+      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session.maxDurationLedgers');
+    });
+
+    test.each([undefined, [], 'markets'])('rejects markets: %j', (value) => {
+      const config = validPluginConfig();
+      config.session = { ...validSessionBlock(), markets: value };
+      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session.markets');
+    });
+
+    test('rejects a market entry with an unknown key', () => {
+      const config = validPluginConfig();
+      config.session = { ...validSessionBlock(), markets: [{ trading: ROUTER, collateral: FEE_TOKEN, vault: ROUTER }] };
+      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session.markets[0].vault');
+    });
+
+    test('rejects a market entry missing its collateral', () => {
+      const config = validPluginConfig();
+      config.session = { ...validSessionBlock(), markets: [{ trading: ROUTER }] };
+      expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session.markets[0].collateral');
+    });
+  });
 });
 
 describe('relayParseConfig', () => {
@@ -168,8 +230,29 @@ describe('DS_API_HOST', () => {
   });
 
   test.each([
+    ['http://localhost:8546', 'http://localhost:8546'],
+    ['http://127.0.0.1:8546', 'http://127.0.0.1:8546'],
+    ['http://127.255.0.1', 'http://127.255.0.1'],
+    ['http://10.1.2.3:8546', 'http://10.1.2.3:8546'],
+    ['http://172.16.0.1', 'http://172.16.0.1'],
+    ['http://172.31.255.254:9000/proxy/', 'http://172.31.255.254:9000/proxy'],
+    ['http://192.168.2.100:8546', 'http://192.168.2.100:8546'], // the local ds-sim mock
+  ])('accepts cleartext http to the loopback/private host %j', (value, expected) => {
+    process.env.DS_API_HOST = value;
+    expect(loadConfig(contextWith(validPluginConfig())).dsApiHost).toBe(expected);
+  });
+
+  test.each([
     'api.dataengine.chain.link', // no scheme
-    'http://api.dataengine.chain.link', // credentials would ride in cleartext
+    'http://api.dataengine.chain.link', // credentials would ride in cleartext to a public host
+    'http://8.8.8.8', // public IPv4
+    'http://172.15.0.1', // just below 172.16/12
+    'http://172.32.0.1', // just above 172.16/12
+    'http://192.169.0.1', // just outside 192.168/16
+    'http://[::1]:8546', // IPv6 loopback is not in the allowlist
+    'http://localhost.example.com', // a public name that merely mentions localhost
+    'http://192.168.2.100?feedID=1', // the caller owns the query string, private host or not
+    'http://user:pass@192.168.2.100',
     'ftp://api.dataengine.chain.link',
     'https://',
     'not a url',

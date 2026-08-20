@@ -7,6 +7,7 @@
 import { Address, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import { pluginError, Json } from '@openzeppelin/relayer-sdk';
 import { HTTP_STATUS } from './constants';
+import { validateSessionRuleCalls } from './session';
 import {
   Call,
   ParsedRelayCall,
@@ -179,6 +180,13 @@ export function parseSubmitRequest(request: RelaySubmitRequest, config: RelayPar
   }
 
   const user = scAddress(args[ROUTER_SLOT.user]!, 'relay user');
+  // Decode the signed batch: session-rule calls get the full structural policy
+  // (session.ts) before the relay spends a simulation on them; everything else
+  // passes through untouched — Soroban auth enforces it on-chain.
+  const callsValue = args[ROUTER_SLOT.calls]!;
+  if (callsValue.switch() !== xdr.ScValType.scvVec()) invalidParams('Relay calls must be a vector of Router Calls');
+  const calls = (callsValue.vec() ?? []).map((value, index) => decodeRouterCall(value, `calls[${index}]`));
+  const sessionExpiries = validateSessionRuleCalls(calls, user, config);
   const feeToken = scAddress(args[ROUTER_SLOT.feeToken]!, 'relay fee token');
   if (feeToken !== config.feeToken.contractId) {
     invalidParams('Relay fee token is not an enabled collateral token');
@@ -205,6 +213,11 @@ export function parseSubmitRequest(request: RelaySubmitRequest, config: RelayPar
     maximumFeeAtomic,
     feeExpiration,
     feedId: priced ? (request.feedId ?? null) : null,
+    // Non-empty expiries imply config.session — the structural pass above fails closed without it.
+    sessionRules:
+      sessionExpiries.length > 0
+        ? { expiries: sessionExpiries, maxDurationLedgers: config.session!.maxDurationLedgers }
+        : null,
     func,
     auth,
   };

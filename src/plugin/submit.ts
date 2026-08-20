@@ -8,6 +8,7 @@ import { Address, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import { pluginError, Relayer } from '@openzeppelin/relayer-sdk';
 import { HTTP_STATUS, RELAY } from './constants';
 import { PLACEHOLDER_FEE_AMOUNT_ATOMIC, ROUTER_SLOT } from './parse';
+import { validateSessionRuleExpiries } from './session';
 import { RelayPrices } from './pricing';
 import { simulateFinal } from './simulation';
 import { ParsedRelayCall } from './types';
@@ -78,6 +79,10 @@ export async function prepareFinalCall(
         },
       }
     );
+  }
+  // The signed batch's session rules (parse.ts) must expire inside the configured window from the live ledger.
+  if (parsed.sessionRules !== null) {
+    validateSessionRuleExpiries(parsed.sessionRules.expiries, receipt.ledger, parsed.sessionRules.maxDurationLedgers);
   }
 
   const feeAtomic = calculateRelayFee(receipt.minResourceFeeStroops, prices.xlmUsd, parsed.feeRateBps);

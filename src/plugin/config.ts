@@ -8,7 +8,7 @@ import { Networks } from '@stellar/stellar-sdk';
 import { pluginError, PluginContext } from '@openzeppelin/relayer-sdk';
 import { DATASTREAMS, HTTP_STATUS } from './constants';
 import { DataStreamsAccess } from './pricing';
-import { RelayParseConfig } from './types';
+import { RelayParseConfig, SessionRulePolicy } from './types';
 
 /** A V3-schema Data Streams feed id: 0x0003-prefixed bytes32 hex — the only schema the report decoder and the on-chain oracle accept. */
 export const FEED_ID_PATTERN = /^0x0003[0-9a-fA-F]{60}$/i;
@@ -23,6 +23,8 @@ export interface ZenexConfig {
   feeTokenDecimals: number;
   /** The Data Streams XLM/USD feed id (bytes32 hex) used for fee conversion. */
   xlmUsdFeedId: string;
+  /** Session-rule co-signing policy; absent means session calls are refused (fail closed). */
+  session?: SessionRulePolicy;
   network: 'testnet' | 'mainnet';
   networkPassphrase: string;
   /** Carries every chain read; its address is the simulation source. */
@@ -76,6 +78,46 @@ function rejectUnknownKeys(value: Record<string, unknown>, allowed: readonly str
   }
 }
 
+/** Soroban ledger sequences are u32s. */
+const MAX_U32 = 0xffffffff;
+
+/**
+ * The optional `session` block: the exact session-rule shape the relay
+ * co-signs (see session.ts). Absent means session calls are refused outright.
+ */
+function sessionRulePolicy(value: unknown): SessionRulePolicy | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) configInvalid('session');
+  const session = value as Record<string, unknown>;
+  rejectUnknownKeys(session, ['policy', 'ed25519Verifier', 'ruleName', 'maxDurationLedgers', 'markets'], 'session');
+  const maxDurationLedgers = session.maxDurationLedgers;
+  if (
+    typeof maxDurationLedgers !== 'number' ||
+    !Number.isInteger(maxDurationLedgers) ||
+    maxDurationLedgers <= 0 ||
+    maxDurationLedgers > MAX_U32
+  ) {
+    configInvalid('session.maxDurationLedgers');
+  }
+  if (!Array.isArray(session.markets) || session.markets.length === 0) configInvalid('session.markets');
+  const markets = session.markets.map((entry: unknown, index) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) configInvalid(`session.markets[${index}]`);
+    const market = entry as Record<string, unknown>;
+    rejectUnknownKeys(market, ['trading', 'collateral'], `session.markets[${index}]`);
+    return {
+      trading: requireConfigString(market.trading, `session.markets[${index}].trading`),
+      collateral: requireConfigString(market.collateral, `session.markets[${index}].collateral`),
+    };
+  });
+  return {
+    policy: requireConfigString(session.policy, 'session.policy'),
+    ed25519Verifier: requireConfigString(session.ed25519Verifier, 'session.ed25519Verifier'),
+    ruleName: requireConfigString(session.ruleName, 'session.ruleName'),
+    maxDurationLedgers,
+    markets,
+  };
+}
+
 /**
  * Load configuration from plugins[].config and environment variables
  */
@@ -83,7 +125,7 @@ export function loadConfig(context: PluginContext): ZenexConfig {
   const config = (context.config ?? {}) as Record<string, unknown>;
   const fees = (config.fees ?? {}) as Record<string, unknown>;
   const feeToken = (fees.feeToken ?? {}) as Record<string, unknown>;
-  rejectUnknownKeys(config, ['router', 'feeRecipient', 'fees', 'xlmUsdFeedId'], '');
+  rejectUnknownKeys(config, ['router', 'feeRecipient', 'fees', 'xlmUsdFeedId', 'session'], '');
   rejectUnknownKeys(fees, ['feeRateBps', 'feeToken'], 'fees');
   rejectUnknownKeys(feeToken, ['contractId', 'decimals'], 'fees.feeToken');
   const feeRateBps = fees.feeRateBps;
@@ -108,6 +150,7 @@ export function loadConfig(context: PluginContext): ZenexConfig {
     feeTokenContractId: requireConfigString(feeToken.contractId, 'fees.feeToken.contractId'),
     feeTokenDecimals: 7,
     xlmUsdFeedId: requireFeedId(config.xlmUsdFeedId),
+    session: sessionRulePolicy(config.session),
     network: networkRaw,
     networkPassphrase: networkRaw === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET,
     fundRelayerId: requireEnv('FUND_RELAYER_ID'),
@@ -132,9 +175,11 @@ function parseUrl(value: string): URL | null {
  * reports from the mainnet endpoint.
  *
  * Requirements are deliberately narrow, because the HMAC credentials ride on every request to
- * whatever this names: https only (no cleartext), no embedded credentials, and no query or
- * fragment (the fetch owns the query string). A trailing slash is trimmed so the joined
- * `${host}${path}` stays single-slashed. Anything else fails closed at load.
+ * whatever this names: https only (no cleartext) — except plain http to a loopback or
+ * RFC1918-private host, where the traffic never crosses the public internet (a local mock Data
+ * Streams stack) — no embedded credentials, and no query or fragment (the fetch owns the query
+ * string). A trailing slash is trimmed so the joined `${host}${path}` stays single-slashed.
+ * Anything else fails closed at load.
  */
 function dataStreamsHost(network: ZenexConfig['network']): string {
   const raw = (process.env.DS_API_HOST ?? '').trim();
@@ -142,7 +187,7 @@ function dataStreamsHost(network: ZenexConfig['network']): string {
   const url = parseUrl(raw);
   if (
     url === null ||
-    url.protocol !== 'https:' ||
+    (url.protocol !== 'https:' && !(url.protocol === 'http:' && isPrivateHost(url.hostname))) ||
     url.username !== '' ||
     url.password !== '' ||
     url.search !== '' ||
@@ -151,6 +196,17 @@ function dataStreamsHost(network: ZenexConfig['network']): string {
     envInvalid('DS_API_HOST');
   }
   return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
+
+// A host cleartext http may name: loopback (localhost, 127.0.0.0/8) or RFC1918-private IPv4
+// (10/8, 172.16/12, 192.168/16). WHATWG URL parsing has already lowercased the hostname and
+// normalized every IPv4 form (hex, octal, int) to dotted decimal, so plain equality suffices.
+function isPrivateHost(hostname: string): boolean {
+  if (hostname === 'localhost') return true;
+  const octets = hostname.split('.');
+  if (octets.length !== 4 || !octets.every((octet) => /^\d{1,3}$/.test(octet))) return false;
+  const [a, b] = octets.map(Number);
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
 }
 
 // Normalized to lowercase so feed comparisons (market vs XLM/USD) are plain equality.
@@ -177,5 +233,6 @@ export function relayParseConfig(config: ZenexConfig): RelayParseConfig {
       decimals: config.feeTokenDecimals,
       feeRateBps: config.feeRateBps,
     },
+    session: config.session,
   };
 }
