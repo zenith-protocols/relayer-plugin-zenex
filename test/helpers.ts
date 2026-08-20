@@ -9,6 +9,11 @@ import type { Relayer } from '@openzeppelin/relayer-sdk';
 import { buildRouterWrap, decodeCallXdrs, PLACEHOLDER_FEE_AMOUNT_ATOMIC } from '../src/plugin/parse';
 import type { RelayParseConfig, RelayPrepareRoute } from '../src/plugin/types';
 
+/** The live XLM/USD Data Streams feed id (the oracle contracts' test vector). */
+export const XLM_FEED_ID = '0x000358cb12b1f5bbeca8b5b4666025a40b15520af1f82516ee2fb9a335055e9a';
+/** A second, distinct V3-shaped feed id for market-vs-XLM tests. */
+export const MARKET_FEED_ID = '0x0003aaaa12b1f5bbeca8b5b4666025a40b15520af1f82516ee2fb9a335055e9a';
+
 export const ROUTER = StrKey.encodeContract(Buffer.alloc(32, 1));
 export const FEE_TOKEN = StrKey.encodeContract(Buffer.alloc(32, 2));
 export const OTHER_CONTRACT = StrKey.encodeContract(Buffer.alloc(32, 3));

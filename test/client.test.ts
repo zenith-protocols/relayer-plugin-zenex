@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Configuration, PluginsApi } from '@openzeppelin/relayer-sdk';
 import { ZenexClient } from '../src/client/zenex-client';
 import { PluginTransportError, PluginExecutionError, PluginUnexpectedError } from '../src/client/errors';
+import { MARKET_FEED_ID } from './helpers';
 
 vi.mock('axios');
 const mockedAxios = axios as unknown as {
@@ -92,10 +93,10 @@ describe('routing', () => {
     const api = mockPluginsApi();
     api.callPlugin.mockResolvedValueOnce({ data: { success: true, data: { func: 'F', authEntries: [] } } });
     const client = new ZenexClient({ pluginId: 'zenex', apiKey: 'k', baseUrl: 'http://localhost:8080' });
-    await client.prepareTryFill({ ...PREPARE_REQUEST, feedId: 42 });
+    await client.prepareTryFill({ ...PREPARE_REQUEST, feedId: MARKET_FEED_ID });
     expect(api.callPlugin).toHaveBeenCalledWith(
       'zenex',
-      { params: { ...PREPARE_REQUEST, feedId: 42 } },
+      { params: { ...PREPARE_REQUEST, feedId: MARKET_FEED_ID } },
       '/prepare/try-fill'
     );
   });

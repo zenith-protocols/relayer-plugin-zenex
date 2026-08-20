@@ -49,14 +49,14 @@ export interface ZenexPrepareRequest {
   expirationLedger: number;
   /** Signed fee cap in the fee token's atomic units, as a decimal string */
   maxFeeAmountAtomic: string;
-  /** Pyth Lazer feed for the market price; required on priced routes, ignored on `calls` */
-  feedId?: number;
+  /** Chainlink Data Streams V3 feed id (`0x0003…` bytes32 hex) for the market price; required on priced routes, ignored on `calls` */
+  feedId?: string;
 }
 
 /**
  * Prepare request for the priced routes (`fill`, `try-fill`): `feedId` is required
  */
-export type ZenexPricedPrepareRequest = ZenexPrepareRequest & { feedId: number };
+export type ZenexPricedPrepareRequest = ZenexPrepareRequest & { feedId: string };
 
 /**
  * One prepared authorization entry for the user to sign (SEP-43 compatible)
@@ -112,8 +112,8 @@ export interface ZenexSubmitRequest {
   func: string;
   /** The signed authorization entry XDRs, base64-encoded */
   auth: string[];
-  /** Pyth Lazer feed for the market price; required when the func is priced */
-  feedId?: number;
+  /** Chainlink Data Streams V3 feed id (`0x0003…` bytes32 hex) for the market price; required when the func is priced */
+  feedId?: string;
 }
 
 /**

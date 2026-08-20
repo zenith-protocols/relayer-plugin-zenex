@@ -3,14 +3,23 @@ import { Address, Networks, scValToNative } from '@stellar/stellar-sdk';
 import { parseSubmitRequest, ROUTER_SLOT } from '../src/plugin/parse';
 import { prepareFinalCall } from '../src/plugin/submit';
 import type { RelayPrices } from '../src/plugin/pricing';
-import { FEE_RECIPIENT, makeAuthEntry, makeFakeRelayer, makeWrap, PARSE_CONFIG, SOURCE, USER } from './helpers';
+import {
+  FEE_RECIPIENT,
+  makeAuthEntry,
+  makeFakeRelayer,
+  makeWrap,
+  MARKET_FEED_ID,
+  PARSE_CONFIG,
+  SOURCE,
+  USER,
+} from './helpers';
 
 const UNPRICED_PRICES: RelayPrices = { xlmUsd: 0.5, marketUpdate: null };
 
 function parsedCall(route: 'calls' | 'fill' = 'calls', options: Parameters<typeof makeWrap>[1] = {}) {
   const func = makeWrap(route, options);
   return parseSubmitRequest(
-    { func, auth: [makeAuthEntry(func, USER)], feedId: route === 'calls' ? undefined : 23 },
+    { func, auth: [makeAuthEntry(func, USER)], feedId: route === 'calls' ? undefined : MARKET_FEED_ID },
     PARSE_CONFIG
   );
 }

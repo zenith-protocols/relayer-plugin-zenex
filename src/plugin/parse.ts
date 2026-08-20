@@ -179,6 +179,12 @@ export function parseSubmitRequest(request: RelaySubmitRequest, config: RelayPar
   }
 
   const user = scAddress(args[ROUTER_SLOT.user]!, 'relay user');
+  // Decode the signed batch structurally; the calls themselves pass through
+  // untouched — the user pays the relay fee, and Soroban auth enforces what
+  // their signature grants on-chain.
+  const callsValue = args[ROUTER_SLOT.calls]!;
+  if (callsValue.switch() !== xdr.ScValType.scvVec()) invalidParams('Relay calls must be a vector of Router Calls');
+  (callsValue.vec() ?? []).forEach((value, index) => decodeRouterCall(value, `calls[${index}]`));
   const feeToken = scAddress(args[ROUTER_SLOT.feeToken]!, 'relay fee token');
   if (feeToken !== config.feeToken.contractId) {
     invalidParams('Relay fee token is not an enabled collateral token');

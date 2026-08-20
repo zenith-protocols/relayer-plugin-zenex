@@ -8,6 +8,7 @@
  */
 
 import { StrKey, xdr } from '@stellar/stellar-sdk';
+import { FEED_ID_PATTERN } from './config';
 import { invalidParams } from './parse';
 import { RelayPrepareRequest, RelaySubmitRequest } from './types';
 
@@ -31,12 +32,13 @@ function requestBody(params: unknown, allowedKeys: readonly string[]): Record<st
   return body;
 }
 
-function validateFeedId(feedId: unknown): number | undefined {
+// Normalized to lowercase to match the config's feed id, so downstream comparisons are plain equality.
+function validateFeedId(feedId: unknown): string | undefined {
   if (feedId === undefined) return undefined;
-  if (typeof feedId !== 'number' || !Number.isSafeInteger(feedId) || feedId < 0) {
-    invalidParams('`feedId` must be a non-negative integer');
+  if (typeof feedId !== 'string' || !FEED_ID_PATTERN.test(feedId)) {
+    invalidParams('`feedId` must be a V3 (`0x0003…`) Data Streams feed id: 0x-prefixed 32-byte hex');
   }
-  return feedId;
+  return feedId.toLowerCase();
 }
 
 // One shared body for the three prepare routes; the route selects the wrap.

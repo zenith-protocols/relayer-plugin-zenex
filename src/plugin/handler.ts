@@ -7,7 +7,7 @@
 import { handler as channelsHandler } from '@openzeppelin/relayer-plugin-channels';
 import { PluginContext, pluginError } from '@openzeppelin/relayer-sdk';
 import type { Relayer } from '@openzeppelin/relayer-sdk';
-import { loadConfig, relayParseConfig, ZenexConfig } from './config';
+import { dataStreamsAccess, loadConfig, relayParseConfig, ZenexConfig } from './config';
 import { HTTP_STATUS, RELAYER_INFO_CACHE_TTL_SECONDS } from './constants';
 import { parseSubmitRequest } from './parse';
 import { prepareRelayEntries } from './prepare';
@@ -86,9 +86,9 @@ async function handlePrepare(context: PluginContext, route: RelayPrepareRoute): 
     });
   }
   const feedId = priced ? (request.feedId ?? null) : null;
-  // Only the priced routes need a price (the request's market feed); an unpriced prepare never touches Pyth.
+  // Only the priced routes need a price (the request's market feed); an unpriced prepare never touches Data Streams.
   const [market, fund] = await Promise.all([
-    feedId === null ? null : fetchMarketUpdate(feedId, config.pythToken, config.pythChannel),
+    feedId === null ? null : fetchMarketUpdate(feedId, dataStreamsAccess(config)),
     resolveFundRelayer(context, config),
   ]);
   return prepareRelayEntries(
@@ -109,7 +109,7 @@ async function handleSubmit(context: PluginContext): Promise<unknown> {
   const config = loadConfig(context);
   const parsed = parseSubmitRequest(request, relayParseConfig(config));
   const [prices, fund] = await Promise.all([
-    fetchRelayPrices(parsed.feedId, config.pythToken, config.pythChannel),
+    fetchRelayPrices(parsed.feedId, config.xlmUsdFeedId, dataStreamsAccess(config)),
     resolveFundRelayer(context, config),
   ]);
   const call = await prepareFinalCall(

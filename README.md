@@ -1,8 +1,8 @@
 # @zenith-protocols/relayer-plugin-zenex
 
 OpenZeppelin Relayer plugin for the Zenex transaction relay. It prepares and
-submits router transactions (auth discovery, Pyth Lazer price injection, fee
-enforcement) and delegates final submission to the embedded
+submits router transactions (auth discovery, Chainlink Data Streams report
+injection, fee enforcement) and delegates final submission to the embedded
 `@openzeppelin/relayer-plugin-channels` handler in-process. The package also
 ships `ZenexClient`, a typed client for the plugin's routes.
 
@@ -15,7 +15,8 @@ npm install @zenith-protocols/relayer-plugin-zenex
 - Node.js >= 20.19
 - An OpenZeppelin Relayer deployment (v1.4.0+) with Redis, a Stellar network
   config, and local signers for the fund and channel accounts
-- A Pyth Lazer access token entitled to the channel you configure
+- Chainlink Data Streams credentials (the portal's user ID and HMAC secret)
+  with access to the feeds you serve
 
 ## Installation & Setup
 
@@ -99,21 +100,27 @@ Then add the signers, relayers, and the plugin entry to your relayer's
           "feeRateBps": 30,
           "feeToken": { "contractId": "C...USDC", "decimals": 7 },
         },
-        "pythChannel": "fixed_rate@1000ms",
+        "xlmUsdFeedId": "0x000358cb12b1f5bbeca8b5b4666025a40b15520af1f82516ee2fb9a335055e9a",
       },
     },
   ],
 }
 ```
 
-Every key the plugin reads is validated for type and value; unrecognized keys
-are ignored, matching the channels plugin's config convention (requests, by
-contrast, are strictly validated — unknown body keys are rejected). There is
-no market map — clients supply `feedId` per request. `pythChannel` must match
-a channel the operator's Pyth token is entitled to. `feeRecipient` must be
-able to hold the fee token (for a SAC-wrapped asset like USDC, a `G...`
-recipient needs the trustline) — otherwise every relayed transaction fails at
-the fee transfer.
+Every key the plugin reads is validated for type and value, and an unrecognized
+key is a hard config error rather than something silently ignored: the embedded
+channels code reads this same `plugins[].config` block for its own per-fund-relayer
+overrides and tolerates what it does not recognize, so a channels-only key
+(`fundRelayers`, say) or a plain typo has to fail loudly here instead of sitting
+in the file doing nothing. Request bodies are strict the same way — unknown body
+keys are rejected. There is no market map — clients supply `feedId` (a V3 Data
+Streams feed id: `0x0003…` bytes32 hex) per request. `xlmUsdFeedId` is the
+XLM/USD stream the relay prices its fee conversion with; it must come from the
+same environment catalog as the host (`STELLAR_NETWORK` selects
+`api.testnet-dataengine.chain.link` or `api.dataengine.chain.link`, unless
+`DS_API_HOST` overrides it). `feeRecipient` must be able to hold the fee token
+(for a SAC-wrapped asset like USDC, a `G...` recipient needs the trustline) —
+otherwise every relayed transaction fails at the fee transfer.
 
 Keep `emit_logs` off outside development: the plugin envelope returns emitted
 logs to the caller in `metadata.logs`, which includes raw simulation
@@ -121,14 +128,16 @@ diagnostics.
 
 ### Configure Environment Variables
 
-These are **not settings invented for this plugin** — with one exception, they
-are properties of the relayer deployment this plugin runs inside:
+These are **not settings invented for this plugin** — with the `DS_*` exceptions,
+they are properties of the relayer deployment this plugin runs inside:
 
-| Variable            | Origin                                                                                                                                                                                                                                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `STELLAR_NETWORK`   | Required by the embedded channels code, which reads it from `process.env` on every call. Any channels-capable relayer deployment already sets it. This plugin reads the same variable (deliberately — a duplicated network setting that could disagree with channels would be a silent passphrase mismatch on the funds path). |
-| `FUND_RELAYER_ID`   | Same: required by the embedded channels code. Also names the relayer whose RPC passthrough carries this plugin's chain reads and whose address is the boot-fetched simulation source.                                                                                                                                          |
-| `PYTH_ACCESS_TOKEN` | The one variable this plugin adds. A secret, so it lives in env rather than `plugins[].config` (that block sits on disk and is readable/patchable through the relayer's plugin API).                                                                                                                                           |
+| Variable          | Origin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STELLAR_NETWORK` | Required by the embedded channels code, which reads it from `process.env` on every call. Any channels-capable relayer deployment already sets it. This plugin reads the same variable (deliberately — a duplicated network setting that could disagree with channels would be a silent passphrase mismatch on the funds path).                                                                                                                                                                                                                                                                                                                                         |
+| `FUND_RELAYER_ID` | Same: required by the embedded channels code. Also names the relayer whose RPC passthrough carries this plugin's chain reads and whose address is the boot-fetched simulation source.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `DS_USER_ID`      | Added by this plugin: the Chainlink Data Streams user ID (the portal's "API key" UUID), sent as the `Authorization` header value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `DS_HMAC_SECRET`  | Added by this plugin: the Data Streams HMAC signing secret. Both are secrets, so they live in env rather than `plugins[].config` (that block sits on disk and is readable/patchable through the relayer's plugin API).                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `DS_API_HOST`     | Optional, added by this plugin: overrides the Data Streams host `STELLAR_NETWORK` would select. Set it when the Data Streams environment and the Stellar network differ — settling on Stellar testnet against a shadow verifier that accepts mainnet DON reports means fetching those reports from `https://api.dataengine.chain.link` with mainnet credentials. Must be an `https://` URL with no embedded credentials, query, or fragment — with one exception for local mocks: cleartext `http://` is accepted when the host is loopback (`localhost`, `127.0.0.0/8`) or RFC1918-private IPv4 (`10/8`, `172.16/12`, `192.168/16`). Anything else fails config load. |
 
 The embedded channels code also honors its own optional env vars
 (`PLUGIN_ADMIN_SECRET`, `LOCK_TTL_SECONDS`, fee tracking, timeouts, …) — see
@@ -222,7 +231,7 @@ const status = await client.getTransaction({ transactionId: submitted.transactio
 ```
 
 `prepareFill` / `prepareTryFill` take the same request with a required
-`feedId`. In relayer mode `getTransaction` uses the embedded channels surface
+`feedId` (a V3 Data Streams feed id: `0x0003…` bytes32 hex). In relayer mode `getTransaction` uses the embedded channels surface
 on the bare route; in direct mode it posts to the edge service's `/status`.
 
 ## Routes
@@ -266,6 +275,29 @@ surface, reachable only with the relayer API key.
 Public authentication and CORS are owned by the Worker; this plugin trusts its
 caller.
 
+## Batch calls pass through
+
+Inner-call targets and arguments pass through without plugin policy
+validation — the wrapper itself is still checked: `parseSubmitRequest` pins the
+Router target, the `*_with_fee` ABI at exact arity, the fee envelope, and the
+structure of every inner call it decodes. What it does not do is judge what
+those calls point at or carry.
+
+Soroban auth is their gate: the user's
+signature covers the inner calls together with the fee constraints — the call
+vector, the fee token, the fee cap, and the fee expiration ledger (the Router
+auth projection, args 0/2/3/4). Within those constraints the relay fills the
+tail it must compute itself: the actual fee amount (rejected if it exceeds the
+signed cap), the fee recipient, the keeper, and the price report. So the user
+does not sign the final wrapper byte-for-byte; they sign what the calls do and
+the most they can be charged for it.
+
+The relay validates its own transaction shape (the Router `*_with_fee` entry
+points at exact arity, the configured fee token, the fee envelope) and nothing
+about the inner calls' targets or arguments — the user pays the relay fee for
+whatever they submit. Smart-account mutations such as `add_context_rule` are
+the user's own business on the user's own account.
+
 ## Deployment constraints
 
 - **Channel accounts must be exclusive to this plugin.** The embedded channels
@@ -277,11 +309,12 @@ caller.
   (`tx_bad_seq` / duplicate submits). Either give this plugin a disjoint
   channel relayer pool, or do not deploy the standalone channels plugin
   alongside it.
-- **Channels' per-fund-relayer overrides pass through.** The embedded channels
-  code reads `fundRelayers` from this plugin's config block (`context.config`
-  is handed over untouched), so per-fund-relayer overrides — dynamic fees,
-  timeouts, transaction params — work here exactly as they do in a standalone
-  channels deployment.
+- **Channels' per-fund-relayer overrides are not configurable here.** The
+  embedded channels code reads `context.config`, but this plugin parses that
+  block strictly and rejects every key it does not define — `fundRelayers`
+  included — so channels-only overrides (dynamic fees, timeouts, transaction
+  params) cannot be passed through it. A stray override fails config load
+  loudly instead of being silently ignored.
 
 ## License
 

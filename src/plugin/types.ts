@@ -34,7 +34,8 @@ export type RouterWrapTail = {
 };
 
 // Submit-side policy: the configured Router at exact arity and the configured fee token.
-// No inner-call allowlist — Soroban auth enforces on-chain.
+// Inner calls pass through untouched — the user pays the relay fee, and Soroban
+// auth enforces what their signature grants on-chain.
 export type RelayParseConfig = {
   router: string;
   feeToken: { contractId: string; decimals: number; feeRateBps: number };
@@ -46,7 +47,7 @@ export interface ParsedRelayCall {
   feeRateBps: number;
   maximumFeeAtomic: bigint;
   feeExpiration: number;
-  feedId: number | null;
+  feedId: string | null;
   /** The client's round-tripped func; its tail is overwritten before any use. */
   func: xdr.HostFunction;
   /** The signed entries, decoded once at parse and forwarded as-is. */
@@ -58,15 +59,15 @@ export interface RelayPrepareRequest {
   calls: readonly string[];
   expirationLedger: number;
   maxFeeAmountAtomic: string;
-  /** Selects the market price on priced routes; ignored on `calls`. */
-  feedId?: number;
+  /** Data Streams feed id (bytes32 hex); selects the market price on priced routes, ignored on `calls`. */
+  feedId?: string;
 }
 
 /** A submit body after validation: the round-tripped func and signed entries, decoded. */
 export interface RelaySubmitRequest {
   func: xdr.HostFunction;
   auth: xdr.SorobanAuthorizationEntry[];
-  feedId?: number;
+  feedId?: string;
 }
 
 export interface RelayPreparedAuthEntry {

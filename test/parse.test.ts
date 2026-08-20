@@ -7,7 +7,16 @@ import {
   PLACEHOLDER_FEE_AMOUNT_ATOMIC,
   ROUTER_SLOT,
 } from '../src/plugin/parse';
-import { FEE_TOKEN, makeCallXdr, makeWrap, OTHER_CONTRACT, PARSE_CONFIG, ROUTER, USER } from './helpers';
+import {
+  FEE_TOKEN,
+  makeCallXdr,
+  makeWrap,
+  MARKET_FEED_ID,
+  OTHER_CONTRACT,
+  PARSE_CONFIG,
+  ROUTER,
+  USER,
+} from './helpers';
 
 describe('decodeCallXdrs', () => {
   test('decodes a Router Call ScMap', () => {
@@ -75,9 +84,9 @@ describe('parseSubmitRequest', () => {
   });
 
   test('accepts a priced wrap with a feedId', () => {
-    const parsed = parseSubmitRequest({ func: makeWrap('fill'), auth: [], feedId: 23 }, PARSE_CONFIG);
+    const parsed = parseSubmitRequest({ func: makeWrap('fill'), auth: [], feedId: MARKET_FEED_ID }, PARSE_CONFIG);
     expect(parsed.priced).toBe(true);
-    expect(parsed.feedId).toBe(23);
+    expect(parsed.feedId).toBe(MARKET_FEED_ID);
   });
 
   test('rejects a priced wrap without a feedId', () => {
