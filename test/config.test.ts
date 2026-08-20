@@ -136,7 +136,6 @@ describe('loadConfig', () => {
     config.session = { policy: ROUTER };
     expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: session');
   });
-
 });
 
 describe('relayParseConfig', () => {

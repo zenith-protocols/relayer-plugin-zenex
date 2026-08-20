@@ -33,7 +33,6 @@ export type RouterWrapTail = {
   priceUpdate?: Uint8Array;
 };
 
-
 // Submit-side policy: the configured Router at exact arity and the configured fee token.
 // Inner calls pass through untouched — the user pays the relay fee, and Soroban
 // auth enforces what their signature grants on-chain.

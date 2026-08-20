@@ -78,7 +78,6 @@ function rejectUnknownKeys(value: Record<string, unknown>, allowed: readonly str
 
 /** Soroban ledger sequences are u32s. */
 
-
 /**
  * Load configuration from plugins[].config and environment variables
  */
