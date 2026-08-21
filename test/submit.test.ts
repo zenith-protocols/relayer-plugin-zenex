@@ -73,6 +73,55 @@ describe('prepareFinalCall', () => {
     expect(Buffer.from(args[ROUTER_SLOT.priceUpdate]!.bytes())).toEqual(Buffer.from(market));
   });
 
+  test('ships the report pulled after the simulation on priced calls', async () => {
+    const simulated = Uint8Array.from([7, 7, 7]);
+    const fresh = Uint8Array.from([9, 9, 9]);
+    const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 100 } });
+    const call = await prepareFinalCall(
+      parsedCall('fill'),
+      FEE_RECIPIENT,
+      { xlmUsd: 0.5, marketUpdate: simulated },
+      SOURCE,
+      relayer,
+      Networks.TESTNET,
+      () => Promise.resolve(fresh)
+    );
+    const args = call.func.invokeContract().args();
+    expect(Buffer.from(args[ROUTER_SLOT.priceUpdate]!.bytes())).toEqual(Buffer.from(fresh));
+  });
+
+  test('keeps the simulated report when the refreshed one changes length', async () => {
+    const simulated = Uint8Array.from([7, 7, 7]);
+    const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 100 } });
+    const call = await prepareFinalCall(
+      parsedCall('fill'),
+      FEE_RECIPIENT,
+      { xlmUsd: 0.5, marketUpdate: simulated },
+      SOURCE,
+      relayer,
+      Networks.TESTNET,
+      () => Promise.resolve(Uint8Array.from([9, 9, 9, 9]))
+    );
+    const args = call.func.invokeContract().args();
+    expect(Buffer.from(args[ROUTER_SLOT.priceUpdate]!.bytes())).toEqual(Buffer.from(simulated));
+  });
+
+  test('keeps the simulated report when the refresh fails', async () => {
+    const simulated = Uint8Array.from([7, 7, 7]);
+    const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 100 } });
+    const call = await prepareFinalCall(
+      parsedCall('fill'),
+      FEE_RECIPIENT,
+      { xlmUsd: 0.5, marketUpdate: simulated },
+      SOURCE,
+      relayer,
+      Networks.TESTNET,
+      () => Promise.reject(new Error('reports/latest responded 503'))
+    );
+    const args = call.func.invokeContract().args();
+    expect(Buffer.from(args[ROUTER_SLOT.priceUpdate]!.bytes())).toEqual(Buffer.from(simulated));
+  });
+
   test('rejects a signed expiration the chain would reach before inclusion', async () => {
     const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 999 } });
     await expect(

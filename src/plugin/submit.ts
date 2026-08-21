@@ -46,6 +46,39 @@ function withTail(
   );
 }
 
+/** Re-pull the market's signed report; null on a call that carries no price. */
+export type RefreshMarketUpdate = () => Promise<Uint8Array>;
+
+/**
+ * Swap in a report pulled after the simulation, keeping the simulated one
+ * unless the fresh report is a like-for-like replacement.
+ *
+ * The swap is post-simulation on purpose, so the guards are structural rather
+ * than simulated: an equal byte length keeps the transaction's size, its
+ * footprint and the verifier's signature work identical to what priced the
+ * fee, and a Data Streams hiccup must never fail a call that already
+ * simulated clean — both fall back to the report the receipt was built on.
+ */
+async function refreshedPriceUpdate(
+  simulated: Uint8Array | null,
+  refresh: RefreshMarketUpdate | null
+): Promise<Uint8Array | null> {
+  if (simulated === null || refresh === null) return simulated;
+  try {
+    const fresh = await refresh();
+    if (fresh.length !== simulated.length) {
+      console.warn(
+        `[zenex] Post-simulation report length changed (${simulated.length} -> ${fresh.length}); keeping the simulated report`
+      );
+      return simulated;
+    }
+    return fresh;
+  } catch (error) {
+    console.warn(`[zenex] Post-simulation report refresh failed, keeping the simulated report: ${error}`);
+    return simulated;
+  }
+}
+
 /**
  * Build the final call from one simulation: the fee is a fixed-width i128,
  * so splicing its value cannot change the footprint.
@@ -56,7 +89,8 @@ export async function prepareFinalCall(
   prices: RelayPrices,
   sourceAccount: string,
   relayer: Relayer,
-  networkPassphrase: string
+  networkPassphrase: string,
+  refreshMarketUpdate: RefreshMarketUpdate | null = null
 ): Promise<FinalCall> {
   // fetchRelayPrices guarantees a market payload whenever the call is priced.
   const priceUpdate = prices.marketUpdate;
@@ -90,5 +124,12 @@ export async function prepareFinalCall(
   }
   console.debug(`[zenex] Fee: feeAtomic=${feeAtomic}, minResourceFee=${receipt.minResourceFeeStroops}`);
 
-  return { func: withTail(parsed, feeAtomic, feeRecipient, priceUpdate), auth: parsed.auth };
+  // Last thing before the call ships: the oracle's staleness window is
+  // measured against the ledger that INCLUDES the call, so every second
+  // between the report fetch and the broadcast is spent from that budget.
+  // The simulation round-trip sits in the middle of it, so re-pull the report
+  // once the receipt is in hand.
+  const shipped = await refreshedPriceUpdate(priceUpdate, refreshMarketUpdate);
+
+  return { func: withTail(parsed, feeAtomic, feeRecipient, shipped), auth: parsed.auth };
 }

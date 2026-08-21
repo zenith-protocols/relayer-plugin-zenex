@@ -118,7 +118,13 @@ async function handleSubmit(context: PluginContext): Promise<unknown> {
     prices,
     fund.address,
     fund.relayer,
-    config.networkPassphrase
+    config.networkPassphrase,
+    // Priced calls re-pull their report after the simulation: the freshness
+    // budget the oracle enforces is spent by the wait for inclusion, not by
+    // the client, so the report must be as young as the broadcast allows.
+    parsed.priced && parsed.feedId !== null
+      ? (): Promise<Uint8Array> => fetchMarketUpdate(parsed.feedId!, dataStreamsAccess(config))
+      : null
   );
   return channelsHandler({
     ...context,
