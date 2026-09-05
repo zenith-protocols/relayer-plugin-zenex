@@ -234,6 +234,10 @@ const status = await client.getTransaction({ transactionId: submitted.transactio
 `feedId` (a V3 Data Streams feed id: `0x0003…` bytes32 hex). In relayer mode `getTransaction` uses the embedded channels surface
 on the bare route; in direct mode it posts to the edge service's `/status`.
 
+The package also exports `isResourceLimitFailure`, which tells a polling client
+whether a failed transaction is worth one more prepare and submit (see Resource
+margin).
+
 ## Routes
 
 `POST /api/v1/plugins/zenex/call` with `context.route`:
@@ -259,7 +263,8 @@ SDK.
 
 **The bare `/call` route (empty route tail) exposes the embedded channels
 handler's entire native surface** — `{func, auth}` and `{xdr}` raw submission,
-`{getTransaction}`, and `{management}` — with the untouched context. Keepers
+`{getTransaction}`, and `{management}` — with the context untouched except for
+the resource margin on its simulations (see Resource margin). Keepers
 and platform services submit raw (no fee abstraction) through the SAME channel
 pool, locks, and sequence caches as fee-abstracted traffic, which is the
 supported way to do raw channel submission alongside this plugin. Channels'
@@ -274,6 +279,32 @@ supplies only the `transactionId`). The bare `/call` route is the privileged
 surface, reachable only with the relayer API key.
 Public authentication and CORS are owned by the Worker; this plugin trusts its
 caller.
+
+## Resource margin
+
+A Soroban transaction declares the resources it may consume, and the relay
+sizes that declaration from a simulation. The simulation reads the ledger one
+or more ledgers before execution. Another transaction can extend the same
+position row or the market singleton in between, so the write set at execution
+is larger than the simulated one and the ledger rejects the transaction with
+`txSorobanInvalid` and a "resources exceeds amount specified" diagnostic.
+
+Every simulation this plugin makes, and every simulation the embedded channels
+handler makes, runs over a margined relayer API. The margin adds 20 percent to
+the simulated instructions, disk read bytes and write bytes, with a floor of
+512 bytes on the two byte dimensions and the ledger's 100M cap on instructions,
+and raises the resource fee by the largest of the three growth factors. The fee the user pays is priced off the
+margined resource fee, so the margin is funded. `RESOURCE_MARGIN` in
+`src/plugin/constants.ts` holds both numbers.
+
+A submission that still fails on a resource limit gets one more attempt with a
+fresh price report and a fresh simulation (`SUBMIT.MAX_ATTEMPTS`). Any other
+failure answers on the first attempt. The response shape does not change.
+
+Clients classify a failure they poll for themselves. The package exports
+`isResourceLimitFailure(failure)`, which accepts a thrown `PluginExecutionError`,
+a plugin error body, or a status reason string, and answers whether one more
+prepare and submit is worth it.
 
 ## Batch calls pass through
 
