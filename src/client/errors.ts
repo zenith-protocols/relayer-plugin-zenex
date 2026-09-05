@@ -65,3 +65,46 @@ export class PluginUnexpectedError extends PluginClientError {
     this.name = 'PluginUnexpectedError';
   }
 }
+
+/**
+ * Result codes and diagnostics that name a Soroban resource-limit failure.
+ * `txSorobanInvalid` is the transaction result code. The byte and instruction
+ * diagnostics arrive as "... resources exceeds amount specified".
+ */
+const RESOURCE_LIMIT_PATTERNS = [/exceeds amount specified/i, /txsorobaninvalid/i, /resource limit exceeded/i];
+
+/** The message and any attached detail of a failure, flattened for pattern matching. */
+function failureText(failure: unknown): string {
+  if (typeof failure === 'string') return failure;
+  if (failure === null || typeof failure !== 'object') return '';
+  const message = failure instanceof Error ? failure.message : '';
+  const seen = new WeakSet<object>();
+  let body: string;
+  try {
+    body =
+      JSON.stringify(failure, (_key, value: unknown) => {
+        if (typeof value !== 'object' || value === null) return value;
+        if (seen.has(value)) return undefined;
+        seen.add(value);
+        return value;
+      }) ?? '';
+  } catch {
+    body = '';
+  }
+  return `${message} ${body}`;
+}
+
+/**
+ * True when a relay failure is a resource-limit failure, which one more attempt can clear.
+ *
+ * A transaction declares the resources its simulation measured. Another
+ * transaction that touches the same position row or the market singleton grows
+ * the write set before this one executes, and the ledger then rejects the
+ * declared amount. A fresh simulation measures the larger write set, so retry.
+ *
+ * Accepts a thrown error, a plugin error body, or a status reason string.
+ */
+export function isResourceLimitFailure(failure: unknown): boolean {
+  const text = failureText(failure);
+  return text.trim() !== '' && RESOURCE_LIMIT_PATTERNS.some((pattern) => pattern.test(text));
+}

@@ -19,4 +19,10 @@ export {
   ZenexGetTransactionRequest,
   ZenexTransactionResponse,
 } from './types';
-export { PluginClientError, PluginTransportError, PluginExecutionError, PluginUnexpectedError } from './errors';
+export {
+  PluginClientError,
+  PluginTransportError,
+  PluginExecutionError,
+  PluginUnexpectedError,
+  isResourceLimitFailure,
+} from './errors';
