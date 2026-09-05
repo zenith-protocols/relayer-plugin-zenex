@@ -7,11 +7,13 @@
 import { handler as channelsHandler } from '@openzeppelin/relayer-plugin-channels';
 import { PluginContext, pluginError } from '@openzeppelin/relayer-sdk';
 import type { Relayer } from '@openzeppelin/relayer-sdk';
+import { isResourceLimitFailure } from '../client/errors';
 import { dataStreamsAccess, loadConfig, relayParseConfig, ZenexConfig } from './config';
-import { HTTP_STATUS, RELAYER_INFO_CACHE_TTL_SECONDS } from './constants';
+import { HTTP_STATUS, RELAYER_INFO_CACHE_TTL_SECONDS, SUBMIT } from './constants';
 import { parseSubmitRequest } from './parse';
 import { prepareRelayEntries } from './prepare';
 import { fetchMarketUpdate, fetchRelayPrices } from './pricing';
+import { withResourceMargin } from './simulation';
 import { validateAndParsePrepareRequest, validateAndParseSubmitRequest } from './validation';
 import { prepareFinalCall } from './submit';
 import { RelayPrepareRoute } from './types';
@@ -104,30 +106,45 @@ async function handlePrepare(context: PluginContext, route: RelayPrepareRoute): 
 
 // One linear forward: parse, swap the relay-owned tail, simulate once, hand the signed call to the
 // embedded channels handler (skipWait). Response and errors are channels' verbatim; the caller polls /status.
+//
+// Every simulation runs over the margined API, so the fee this plugin prices and
+// the resources the channel assembly declares both carry the resource margin. A
+// resource-limit failure gets SUBMIT.MAX_ATTEMPTS attempts. Each attempt takes a
+// fresh price report and a fresh simulation, which measures the write set as it
+// stands at that moment. Channels answers before inclusion (skipWait), so a
+// thrown failure means the relayer rejected the submission and no transaction
+// reached the network.
 async function handleSubmit(context: PluginContext): Promise<unknown> {
   const request = validateAndParseSubmitRequest(context.params);
   const config = loadConfig(context);
   const parsed = parseSubmitRequest(request, relayParseConfig(config));
-  const [prices, fund] = await Promise.all([
-    fetchRelayPrices(parsed.feedId, config.xlmUsdFeedId, dataStreamsAccess(config)),
-    resolveFundRelayer(context, config),
-  ]);
-  const call = await prepareFinalCall(
-    parsed,
-    config.feeRecipient,
-    prices,
-    fund.address,
-    fund.relayer,
-    config.networkPassphrase
-  );
-  return channelsHandler({
-    ...context,
-    params: {
-      func: call.func.toXDR('base64'),
-      auth: call.auth.map((entry) => entry.toXDR('base64')),
-      skipWait: true,
-    },
-  });
+  const marginedContext = { ...context, api: withResourceMargin(context.api) };
+  const fund = await resolveFundRelayer(marginedContext, config);
+
+  for (let attempt = 1; ; attempt++) {
+    const prices = await fetchRelayPrices(parsed.feedId, config.xlmUsdFeedId, dataStreamsAccess(config));
+    const call = await prepareFinalCall(
+      parsed,
+      config.feeRecipient,
+      prices,
+      fund.address,
+      fund.relayer,
+      config.networkPassphrase
+    );
+    try {
+      return await channelsHandler({
+        ...marginedContext,
+        params: {
+          func: call.func.toXDR('base64'),
+          auth: call.auth.map((entry) => entry.toXDR('base64')),
+          skipWait: true,
+        },
+      });
+    } catch (error) {
+      if (attempt >= SUBMIT.MAX_ATTEMPTS || !isResourceLimitFailure(error)) throw error;
+      console.warn(`[zenex] Resource limit hit on attempt ${attempt}. Simulating again and resubmitting.`);
+    }
+  }
 }
 
 /**
@@ -139,7 +156,7 @@ export async function handler(context: PluginContext): Promise<unknown> {
   // unpoliced, so the edge must forward only /call/prepare/* and /call/submit publicly; status polling goes
   // through the core transactions API (GET /api/v1/relayers/{id}/transactions/{txId}), not the plugin.
   if (context.route === '' || context.route === '/') {
-    return channelsHandler(context);
+    return channelsHandler({ ...context, api: withResourceMargin(context.api) });
   }
   console.log(`[zenex] Flow: ${context.route}`);
   switch (context.route) {
