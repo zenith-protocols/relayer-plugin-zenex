@@ -15,7 +15,7 @@ import {
   USER,
   XLM_FEED_ID,
 } from './helpers';
-import { DATASTREAMS } from '../src/plugin/constants';
+import { DATASTREAMS, SUBMIT } from '../src/plugin/constants';
 
 const channelsHandler = vi.fn();
 vi.mock('@openzeppelin/relayer-plugin-channels', () => ({
@@ -84,11 +84,13 @@ function makeContext(
 }
 
 describe('handler routing', () => {
-  test('delegates the bare route to the embedded channels handler untouched', async () => {
+  test('delegates the bare route to the embedded channels handler over the margined api', async () => {
     channelsHandler.mockResolvedValueOnce({ channels: true });
     const context = makeContext('', { xdr: 'AAAA' }, makeFakeRelayer({}));
     await expect(handler(context)).resolves.toEqual({ channels: true });
-    expect(channelsHandler).toHaveBeenCalledWith(context);
+    const forwarded = channelsHandler.mock.calls[0]![0] as PluginContext;
+    expect(forwarded).toMatchObject({ route: '', params: context.params, config: context.config });
+    expect(forwarded.api).not.toBe(context.api);
   });
 
   test('answers unknown routes with NOT_FOUND', async () => {
@@ -214,6 +216,73 @@ describe('submit route', () => {
     // The forwarded func carries the repriced tail, not the client's placeholder.
     expect(params.func).not.toBe(wrap.toXDR('base64').toString());
     expect(params.auth).toEqual([signed.toXDR('base64').toString()]);
+  });
+
+  test('resimulates and submits again after a resource-limit failure', async () => {
+    fetchRelayPrices.mockResolvedValue({ xlmUsd: 0.5, marketUpdate: null });
+    channelsHandler.mockRejectedValueOnce(
+      Object.assign(new Error('Transaction failed'), {
+        code: 'ONCHAIN_FAILED',
+        details: { reason: 'operation byte-write resources exceeds amount specified' },
+      })
+    );
+    channelsHandler.mockResolvedValueOnce({ transactionId: 'tx-2', status: 'submitted', hash: null });
+
+    const wrap = makeWrap('calls');
+    const signed = makeAuthEntry(wrap, USER, { expiration: 1_000 });
+    const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 100 } });
+    const context = makeContext(
+      '/submit',
+      { func: wrap.toXDR('base64').toString(), auth: [signed.toXDR('base64').toString()] },
+      relayer
+    );
+
+    const result = await handler(context);
+    expect(result).toEqual({ transactionId: 'tx-2', status: 'submitted', hash: null });
+    expect(channelsHandler).toHaveBeenCalledTimes(2);
+    // The second attempt prices a fresh report off a fresh simulation.
+    expect(fetchRelayPrices).toHaveBeenCalledTimes(2);
+  });
+
+  test('stops after the attempt budget and answers the resource-limit failure', async () => {
+    fetchRelayPrices.mockResolvedValue({ xlmUsd: 0.5, marketUpdate: null });
+    channelsHandler.mockRejectedValue(
+      Object.assign(new Error('Transaction failed'), {
+        code: 'ONCHAIN_FAILED',
+        details: { reason: 'operation byte-write resources exceeds amount specified' },
+      })
+    );
+
+    const wrap = makeWrap('calls');
+    const signed = makeAuthEntry(wrap, USER, { expiration: 1_000 });
+    const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 100 } });
+    const context = makeContext(
+      '/submit',
+      { func: wrap.toXDR('base64').toString(), auth: [signed.toXDR('base64').toString()] },
+      relayer
+    );
+
+    await expect(handler(context)).rejects.toMatchObject({ code: 'ONCHAIN_FAILED' });
+    expect(channelsHandler).toHaveBeenCalledTimes(SUBMIT.MAX_ATTEMPTS);
+  });
+
+  test('answers an unrelated channels failure without a second attempt', async () => {
+    fetchRelayPrices.mockResolvedValue({ xlmUsd: 0.5, marketUpdate: null });
+    channelsHandler.mockRejectedValue(
+      Object.assign(new Error('Insufficient balance'), { code: 'ONCHAIN_FAILED', details: { reason: 'txFailed' } })
+    );
+
+    const wrap = makeWrap('calls');
+    const signed = makeAuthEntry(wrap, USER, { expiration: 1_000 });
+    const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 100 } });
+    const context = makeContext(
+      '/submit',
+      { func: wrap.toXDR('base64').toString(), auth: [signed.toXDR('base64').toString()] },
+      relayer
+    );
+
+    await expect(handler(context)).rejects.toMatchObject({ code: 'ONCHAIN_FAILED' });
+    expect(channelsHandler).toHaveBeenCalledTimes(1);
   });
 
   test('caches relayer info across calls on the same fund relayer', async () => {

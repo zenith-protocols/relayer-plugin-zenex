@@ -2,7 +2,12 @@ import { describe, test, expect, beforeEach, vi } from 'vitest';
 import axios from 'axios';
 import { Configuration, PluginsApi } from '@openzeppelin/relayer-sdk';
 import { ZenexClient } from '../src/client/zenex-client';
-import { PluginTransportError, PluginExecutionError, PluginUnexpectedError } from '../src/client/errors';
+import {
+  PluginTransportError,
+  PluginExecutionError,
+  PluginUnexpectedError,
+  isResourceLimitFailure,
+} from '../src/client/errors';
 import { MARKET_FEED_ID } from './helpers';
 
 vi.mock('axios');
@@ -195,5 +200,45 @@ describe('response handling', () => {
     const client = new ZenexClient({ baseUrl: 'https://relay.example.com' });
     const result = await client.submit({ func: 'F', auth: ['A'] });
     expect(result.metadata?.logs).toHaveLength(1);
+  });
+});
+
+describe('isResourceLimitFailure', () => {
+  // The two failures seen on chain: the write set grew between the simulation
+  // and the ledger that executed the transaction.
+  test('classifies the byte-write diagnostic as retryable', () => {
+    const failure = new PluginExecutionError('Transaction failed', {
+      code: 'ONCHAIN_FAILED',
+      reason: 'operation byte-write resources exceeds amount specified',
+    });
+    expect(isResourceLimitFailure(failure)).toBe(true);
+  });
+
+  test('classifies a txSorobanInvalid result code as retryable', () => {
+    const failure = new PluginExecutionError('txFeeBumpInnerFailed', {
+      code: 'ONCHAIN_FAILED',
+      resultCode: 'txFeeBumpInnerFailed:txSorobanInvalid',
+    });
+    expect(isResourceLimitFailure(failure)).toBe(true);
+  });
+
+  test('reads a plain status reason string', () => {
+    expect(isResourceLimitFailure('2188 declared vs 1992 actual, resource limit exceeded')).toBe(true);
+  });
+
+  test('leaves an unrelated failure terminal', () => {
+    const failure = new PluginExecutionError('Relay fee exceeds the user-signed maximum', {
+      code: 'FEE_EXCEEDS_SIGNED_MAXIMUM',
+    });
+    expect(isResourceLimitFailure(failure)).toBe(false);
+    expect(isResourceLimitFailure('Error(Contract, #12)')).toBe(false);
+    expect(isResourceLimitFailure(undefined)).toBe(false);
+    expect(isResourceLimitFailure({})).toBe(false);
+  });
+
+  test('survives a failure that carries a cycle', () => {
+    const failure: Record<string, unknown> = { reason: 'byte-write resources exceeds amount specified' };
+    failure.self = failure;
+    expect(isResourceLimitFailure(failure)).toBe(true);
   });
 });

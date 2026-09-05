@@ -119,11 +119,33 @@ export function makeSourceAccountEntry(func: xdr.HostFunction): xdr.SorobanAutho
   });
 }
 
+/** A `SorobanTransactionData` over an empty footprint at the given resource sizes, base64-encoded. */
+export function makeTransactionData(resources: {
+  instructions: number;
+  diskReadBytes: number;
+  writeBytes: number;
+  resourceFee: string;
+}): string {
+  return new xdr.SorobanTransactionData({
+    ext: new xdr.SorobanTransactionDataExt(0),
+    resources: new xdr.SorobanResources({
+      footprint: new xdr.LedgerFootprint({ readOnly: [], readWrite: [] }),
+      instructions: resources.instructions,
+      diskReadBytes: resources.diskReadBytes,
+      writeBytes: resources.writeBytes,
+    }),
+    resourceFee: xdr.Int64.fromString(resources.resourceFee),
+  })
+    .toXDR('base64')
+    .toString();
+}
+
 export interface FakeSimulation {
   auth?: xdr.SorobanAuthorizationEntry[];
   retval?: xdr.ScVal;
   latestLedger?: number;
   minResourceFee?: string;
+  transactionData?: string;
   error?: string;
 }
 
@@ -151,6 +173,7 @@ export function makeFakeRelayer(byAuthMode: Partial<Record<'record' | 'enforce',
           ],
           latestLedger: sim.latestLedger ?? 100,
           minResourceFee: sim.minResourceFee ?? '1000000',
+          ...(sim.transactionData ? { transactionData: sim.transactionData } : {}),
         },
       };
     },
