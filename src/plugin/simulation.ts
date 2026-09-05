@@ -5,11 +5,15 @@
  * (auth discovery in record mode, final-call validation in enforce mode). The
  * parsed diagnostic travels to the caller, who owns decoding
  * `Error(Contract, #N)` via the zenex SDK — the plugin decodes nothing.
+ *
+ * This module also owns the resource margin. `withResourceMargin` wraps the
+ * relayer API, so every `simulateTransaction` answer that reaches the fee
+ * pricing and the channel assembly already carries the margin.
  */
 
 import { Account, Operation, rpc, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
-import { JsonRpcResponseNetworkRpcResult, pluginError, Relayer } from '@openzeppelin/relayer-sdk';
-import { HTTP_STATUS, SIMULATION, TIME } from './constants';
+import { JsonRpcResponseNetworkRpcResult, PluginAPI, pluginError, Relayer } from '@openzeppelin/relayer-sdk';
+import { HTTP_STATUS, RESOURCE_MARGIN, SIMULATION, TIME } from './constants';
 
 /** An auth-discovery answer: required auth entries, decoded retval, ledger. */
 export interface DiscoverySimulation {
@@ -178,4 +182,114 @@ export async function simulateFinal(
     ledger: simResult.latestLedger,
     minResourceFeeStroops: BigInt(simResult.minResourceFee),
   };
+}
+
+/** Grow one byte dimension: the margin ratio, or the byte floor, whichever is larger. */
+function marginedBytes(value: number): number {
+  return value + Math.max(Math.ceil(value * RESOURCE_MARGIN.RATIO), RESOURCE_MARGIN.MIN_BYTES);
+}
+
+/**
+ * Grow the instruction count by the margin ratio, up to the ledger cap.
+ * Instructions carry no absolute floor. A simulation that already sits at the
+ * cap keeps its own count.
+ */
+function marginedInstructions(value: number): number {
+  return Math.max(value, Math.min(value + Math.ceil(value * RESOURCE_MARGIN.RATIO), RESOURCE_MARGIN.MAX_INSTRUCTIONS));
+}
+
+/** How much one dimension grew. A dimension that simulated as zero grew by nothing. */
+function growthFactor(after: number, before: number): number {
+  return before > 0 ? after / before : 1;
+}
+
+/** Scale a stroop amount by a factor, rounded up, at millifactor precision. */
+function scaleUp(amount: bigint, factor: number): bigint {
+  const milli = BigInt(Math.ceil(factor * 1000));
+  return (amount * milli + 999n) / 1000n;
+}
+
+/**
+ * Raise the simulated resources of one `simulateTransaction` result by the margin.
+ *
+ * The resource fee grows by the largest growth factor of the three dimensions,
+ * so the declared fee pays for whatever the margin added. `minResourceFee` and
+ * the `transactionData` resource fee stay equal, which is what the assembly and
+ * the fee bump both read. A result without `transactionData` passes through.
+ */
+export function applyResourceMargin(
+  result: rpc.Api.RawSimulateTransactionResponse
+): rpc.Api.RawSimulateTransactionResponse {
+  if (!result.transactionData || !result.minResourceFee) return result;
+
+  let data: xdr.SorobanTransactionData;
+  try {
+    data = xdr.SorobanTransactionData.fromXDR(result.transactionData, 'base64');
+  } catch {
+    // An unparseable footprint is the assembly's failure to report, not this one's.
+    return result;
+  }
+
+  const resources = data.resources();
+  const instructions = resources.instructions();
+  const diskReadBytes = resources.diskReadBytes();
+  const writeBytes = resources.writeBytes();
+
+  resources.instructions(marginedInstructions(instructions));
+  resources.diskReadBytes(marginedBytes(diskReadBytes));
+  resources.writeBytes(marginedBytes(writeBytes));
+
+  const growth = Math.max(
+    1 + RESOURCE_MARGIN.RATIO,
+    growthFactor(resources.instructions(), instructions),
+    growthFactor(resources.diskReadBytes(), diskReadBytes),
+    growthFactor(resources.writeBytes(), writeBytes)
+  );
+  const resourceFee = scaleUp(BigInt(result.minResourceFee), growth);
+  data.resourceFee(xdr.Int64.fromString(resourceFee.toString()));
+
+  return {
+    ...result,
+    transactionData: data.toXDR('base64'),
+    minResourceFee: resourceFee.toString(),
+  };
+}
+
+/** True when the payload asks the RPC node to simulate a transaction. */
+function isSimulateRequest(payload: { method?: string }): boolean {
+  return payload.method === 'simulateTransaction';
+}
+
+/**
+ * Wrap the relayer API so every simulation answer carries the resource margin.
+ *
+ * The margin has one seam: the JSON-RPC passthrough that both this plugin and
+ * the embedded channels handler simulate over. Padding the answer there sizes
+ * the fee this plugin charges and the resources the assembled transaction
+ * declares from one number.
+ */
+export function withResourceMargin(api: PluginAPI): PluginAPI {
+  return new Proxy(api, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (property !== 'useRelayer' || typeof value !== 'function') return value;
+      return (relayerId: string): Relayer => marginedRelayer(api.useRelayer(relayerId));
+    },
+  });
+}
+
+/** The relayer with its `simulateTransaction` answers margined. Every other method passes through. */
+function marginedRelayer(relayer: Relayer): Relayer {
+  return new Proxy(relayer, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (property !== 'rpc' || typeof value !== 'function') return value;
+      return async (payload: Parameters<Relayer['rpc']>[0]): Promise<JsonRpcResponseNetworkRpcResult> => {
+        const response = await relayer.rpc(payload);
+        if (!isSimulateRequest(payload) || response.error || !response.result) return response;
+        const margined = applyResourceMargin(response.result as rpc.Api.RawSimulateTransactionResponse);
+        return { ...response, result: margined } as JsonRpcResponseNetworkRpcResult;
+      };
+    },
+  });
 }

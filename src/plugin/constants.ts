@@ -47,3 +47,23 @@ export const RELAY = {
   /** Minimum ledgers between a simulation's own ledger and a signed expiration: clears channels' 2-ledger buffer plus inclusion latency. */
   MIN_EXPIRATION_BUFFER_LEDGERS: 3,
 } as const;
+
+// Margin added to every simulated Soroban resource dimension before a transaction declares it.
+export const RESOURCE_MARGIN = {
+  /**
+   * Fraction added to the simulated instructions, disk read bytes and write bytes.
+   * A simulation reads the ledger one or more ledgers before execution. Another
+   * transaction can extend the same position row or the market singleton in
+   * between, so the write set at execution is larger than the simulated one.
+   */
+  RATIO: 0.2,
+  /** Floor of the added amount for the byte dimensions, in bytes. A small footprint needs more than 20 percent. */
+  MIN_BYTES: 512,
+  /** Ledger cap on the instructions of one transaction. The margin declares no more than this. */
+  MAX_INSTRUCTIONS: 100_000_000,
+} as const;
+
+export const SUBMIT = {
+  /** Total submit attempts. A resource-limit failure gets one fresh simulation and one more submission. */
+  MAX_ATTEMPTS: 2,
+} as const;
