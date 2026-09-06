@@ -49,6 +49,9 @@ export const RELAY = {
 } as const;
 
 // Margin added to every simulated Soroban resource dimension before a transaction declares it.
+// The three caps mirror the network's current per-transaction limits. An operator reads the live
+// values from the ledger config settings the RPC serves: `ContractComputeV0.txMaxInstructions`,
+// and `ContractLedgerCostV0.txMaxDiskReadBytes` and `txMaxWriteBytes`.
 export const RESOURCE_MARGIN = {
   /**
    * Fraction added to the simulated instructions, disk read bytes and write bytes.
@@ -61,6 +64,10 @@ export const RESOURCE_MARGIN = {
   MIN_BYTES: 512,
   /** Ledger cap on the instructions of one transaction. The margin declares no more than this. */
   MAX_INSTRUCTIONS: 100_000_000,
+  /** Ledger cap on the disk read bytes of one transaction, in bytes. */
+  MAX_DISK_READ_BYTES: 200_000,
+  /** Ledger cap on the write bytes of one transaction, in bytes. */
+  MAX_WRITE_BYTES: 132_096,
 } as const;
 
 export const SUBMIT = {

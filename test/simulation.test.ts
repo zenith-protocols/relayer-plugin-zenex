@@ -53,6 +53,49 @@ describe('applyResourceMargin', () => {
     expect(resourcesOf(margined.transactionData!).instructions()).toBe(RESOURCE_MARGIN.MAX_INSTRUCTIONS);
   });
 
+  test('declares no more disk read bytes than the ledger cap', () => {
+    const nearCap = { ...FOOTPRINT, diskReadBytes: RESOURCE_MARGIN.MAX_DISK_READ_BYTES - 100 };
+    const margined = applyResourceMargin({
+      ...simulationResult(),
+      transactionData: makeTransactionData(nearCap),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    expect(resourcesOf(margined.transactionData!).diskReadBytes()).toBe(RESOURCE_MARGIN.MAX_DISK_READ_BYTES);
+  });
+
+  test('declares no more write bytes than the ledger cap', () => {
+    const nearCap = { ...FOOTPRINT, writeBytes: RESOURCE_MARGIN.MAX_WRITE_BYTES - 100 };
+    const margined = applyResourceMargin({
+      ...simulationResult(),
+      transactionData: makeTransactionData(nearCap),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    expect(resourcesOf(margined.transactionData!).writeBytes()).toBe(RESOURCE_MARGIN.MAX_WRITE_BYTES);
+  });
+
+  test('keeps a simulated footprint that already sits above the caps', () => {
+    const overCap = {
+      ...FOOTPRINT,
+      instructions: RESOURCE_MARGIN.MAX_INSTRUCTIONS + 1,
+      diskReadBytes: RESOURCE_MARGIN.MAX_DISK_READ_BYTES + 1,
+      writeBytes: RESOURCE_MARGIN.MAX_WRITE_BYTES + 1,
+    };
+    const margined = applyResourceMargin({
+      ...simulationResult(),
+      transactionData: makeTransactionData(overCap),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    const resources = resourcesOf(margined.transactionData!);
+    expect(resources.instructions()).toBe(overCap.instructions);
+    expect(resources.diskReadBytes()).toBe(overCap.diskReadBytes);
+    expect(resources.writeBytes()).toBe(overCap.writeBytes);
+    // Nothing grew, so the fee the user pays does not grow either.
+    expect(margined.minResourceFee).toBe(FOOTPRINT.resourceFee);
+  });
+
   test('passes a result without transaction data through', () => {
     const result = simulationResult({ transactionData: undefined, error: 'HostError' });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

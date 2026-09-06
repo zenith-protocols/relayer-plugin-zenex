@@ -184,9 +184,14 @@ export async function simulateFinal(
   };
 }
 
-/** Grow one byte dimension: the margin ratio, or the byte floor, whichever is larger. */
-function marginedBytes(value: number): number {
-  return value + Math.max(Math.ceil(value * RESOURCE_MARGIN.RATIO), RESOURCE_MARGIN.MIN_BYTES);
+/**
+ * Grow one byte dimension by the margin ratio or the byte floor, whichever is
+ * larger, up to the ledger cap for that dimension. A simulation that already
+ * sits at or above the cap keeps its own count.
+ */
+function marginedBytes(value: number, limit: number): number {
+  const grown = value + Math.max(Math.ceil(value * RESOURCE_MARGIN.RATIO), RESOURCE_MARGIN.MIN_BYTES);
+  return Math.max(value, Math.min(grown, limit));
 }
 
 /**
@@ -213,7 +218,8 @@ function scaleUp(amount: bigint, factor: number): bigint {
  * Raise the simulated resources of one `simulateTransaction` result by the margin.
  *
  * The resource fee grows by the largest growth factor of the three dimensions,
- * so the declared fee pays for whatever the margin added. `minResourceFee` and
+ * so the declared fee pays for whatever the margin added. A footprint the caps
+ * clamp keeps its own fee. `minResourceFee` and
  * the `transactionData` resource fee stay equal, which is what the assembly and
  * the fee bump both read. A result without `transactionData` passes through.
  */
@@ -236,11 +242,10 @@ export function applyResourceMargin(
   const writeBytes = resources.writeBytes();
 
   resources.instructions(marginedInstructions(instructions));
-  resources.diskReadBytes(marginedBytes(diskReadBytes));
-  resources.writeBytes(marginedBytes(writeBytes));
+  resources.diskReadBytes(marginedBytes(diskReadBytes, RESOURCE_MARGIN.MAX_DISK_READ_BYTES));
+  resources.writeBytes(marginedBytes(writeBytes, RESOURCE_MARGIN.MAX_WRITE_BYTES));
 
   const growth = Math.max(
-    1 + RESOURCE_MARGIN.RATIO,
     growthFactor(resources.instructions(), instructions),
     growthFactor(resources.diskReadBytes(), diskReadBytes),
     growthFactor(resources.writeBytes(), writeBytes)
