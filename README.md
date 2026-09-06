@@ -292,14 +292,20 @@ is larger than the simulated one and the ledger rejects the transaction with
 Every simulation this plugin makes, and every simulation the embedded channels
 handler makes, runs over a margined relayer API. The margin adds 20 percent to
 the simulated instructions, disk read bytes and write bytes, with a floor of
-512 bytes on the two byte dimensions and the ledger's 100M cap on instructions,
-and raises the resource fee by the largest of the three growth factors. The fee the user pays is priced off the
+512 bytes on the two byte dimensions. Each dimension is clamped to the
+network's per-transaction limit and never falls below the simulated value. The
+resource fee rises by the largest of the three growth factors, so a footprint
+the clamps hold keeps its own fee. The fee the user pays is priced off the
 margined resource fee, so the margin is funded. `RESOURCE_MARGIN` in
 `src/plugin/constants.ts` holds both numbers.
 
 A submission that still fails on a resource limit gets one more attempt with a
-fresh price report and a fresh simulation (`SUBMIT.MAX_ATTEMPTS`). Any other
-failure answers on the first attempt. The response shape does not change.
+fresh price report and a fresh simulation (`SUBMIT.MAX_ATTEMPTS`). The failure
+must name a resource: the "resources exceeds amount specified" diagnostic, or a
+`ResourceLimitExceeded` operation result. A bare `txSorobanInvalid` also carries
+an invalid footprint and an insufficient resource fee, which no retry clears, so
+it answers on the first attempt like every other failure. The response shape
+does not change.
 
 Clients classify a failure they poll for themselves. The package exports
 `isResourceLimitFailure(failure)`, which accepts a thrown `PluginExecutionError`,
