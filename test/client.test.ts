@@ -214,12 +214,23 @@ describe('isResourceLimitFailure', () => {
     expect(isResourceLimitFailure(failure)).toBe(true);
   });
 
-  test('classifies a txSorobanInvalid result code as retryable', () => {
+  test('classifies the ResourceLimitExceeded operation result as retryable', () => {
+    const failure = new PluginExecutionError('txFeeBumpInnerFailed', {
+      code: 'ONCHAIN_FAILED',
+      reason: 'reason=txFeeBumpInnerFailed inner=txSorobanInvalid op=ResourceLimitExceeded',
+    });
+    expect(isResourceLimitFailure(failure)).toBe(true);
+  });
+
+  test('leaves a txSorobanInvalid that names no resource terminal', () => {
     const failure = new PluginExecutionError('txFeeBumpInnerFailed', {
       code: 'ONCHAIN_FAILED',
       resultCode: 'txFeeBumpInnerFailed:txSorobanInvalid',
+      reason: 'invalid footprint: ledger entry is missing from the read set',
     });
-    expect(isResourceLimitFailure(failure)).toBe(true);
+    // txSorobanInvalid also carries an invalid footprint and an insufficient
+    // resource fee. Neither clears on a retry.
+    expect(isResourceLimitFailure(failure)).toBe(false);
   });
 
   test('reads a plain status reason string', () => {
