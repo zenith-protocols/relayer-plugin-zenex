@@ -15,6 +15,9 @@ import { ParsedRelayCall } from './types';
 /** The exact call handed to the embedded channels plugin. */
 export type FinalCall = { func: xdr.HostFunction; auth: xdr.SorobanAuthorizationEntry[] };
 
+/** The smallest fee the forwarder accepts: its OZ fee bounds reject `fee_amount == 0`. */
+const MIN_FORWARDER_FEE_ATOMIC = 1n;
+
 // Stroops and the 7-decimal fee token share a scale, so the conversion is the USD price alone. Every
 // magnitude here sits far below 2^53; ceil never undercharges a fractional unit.
 function calculateRelayFee(costStroops: bigint, xlmUsd: number, feeRateBps: number): bigint {
@@ -93,7 +96,13 @@ export async function prepareFinalCall(
     );
   }
 
-  const feeAtomic = calculateRelayFee(receipt.minResourceFeeStroops, prices.xlmUsd, parsed.feeRateBps);
+  const computedFeeAtomic = calculateRelayFee(receipt.minResourceFeeStroops, prices.xlmUsd, parsed.feeRateBps);
+  // The forwarder's fee bounds (OZ) reject a zero fee, where the Router's wraps skip it: forwarder mode
+  // charges at least one atomic unit so a zero rate or price still lands.
+  const feeAtomic =
+    parsed.mode === 'forwarder' && computedFeeAtomic < MIN_FORWARDER_FEE_ATOMIC
+      ? MIN_FORWARDER_FEE_ATOMIC
+      : computedFeeAtomic;
   if (feeAtomic > parsed.maximumFeeAtomic) {
     throw pluginError('Relay fee exceeds the user-signed maximum', {
       code: 'FEE_EXCEEDS_SIGNED_MAXIMUM',

@@ -59,6 +59,19 @@ describe('prepareFinalCall', () => {
     expect(scValToNative(call.func.invokeContract().args()[ROUTER_SLOT.feeAmount]!)).toBe(1n);
   });
 
+  test('keeps a zero fee in router mode, where the wraps skip collection', async () => {
+    const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 100 } });
+    const call = await prepareFinalCall(
+      parsedCall(),
+      FEE_RECIPIENT,
+      { xlmUsd: 0, marketUpdate: null },
+      SOURCE,
+      relayer,
+      Networks.TESTNET
+    );
+    expect(scValToNative(call.func.invokeContract().args()[ROUTER_SLOT.feeAmount]!)).toBe(0n);
+  });
+
   test('overwrites keeper and price update on priced calls', async () => {
     const market = Uint8Array.from([7, 7, 7]);
     const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 100 } });
@@ -167,6 +180,19 @@ describe('prepareFinalCall (forwarder mode)', () => {
     const beforeTarget = func.invokeContract().args()[FORWARDER_SLOT.targetArgs]!.vec()!;
     expect(targetArgs[TARGET_SLOT.calls]!.toXDR('base64')).toBe(beforeTarget[TARGET_SLOT.calls]!.toXDR('base64'));
     expect(targetArgs[TARGET_SLOT.user]!.toXDR('base64')).toBe(beforeTarget[TARGET_SLOT.user]!.toXDR('base64'));
+  });
+
+  test('charges at least one atomic unit, since the forwarder rejects a zero fee', async () => {
+    const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 100 } });
+    const call = await prepareFinalCall(
+      forwardedCall('calls').parsed,
+      FEE_RECIPIENT,
+      { xlmUsd: 0, marketUpdate: null },
+      SOURCE,
+      relayer,
+      Networks.TESTNET
+    );
+    expect(scValToNative(call.func.invokeContract().args()[FORWARDER_SLOT.feeAmount]!)).toBe(1n);
   });
 
   test('rejects a computed fee above the user-signed maximum', async () => {
