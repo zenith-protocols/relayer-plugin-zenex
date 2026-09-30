@@ -1,21 +1,30 @@
 import { describe, test, expect } from 'vitest';
 import { Address, scValToNative, xdr } from '@stellar/stellar-sdk';
 import {
+  authProjection,
   decodeCallXdrs,
+  FORWARDER_SLOT,
   parseCallOutcome,
   parseSubmitRequest,
   PLACEHOLDER_FEE_AMOUNT_ATOMIC,
   ROUTER_SLOT,
+  TARGET_SLOT,
 } from '../src/plugin/parse';
 import {
+  FEE_RECIPIENT,
   FEE_TOKEN,
+  FORWARDER,
+  FORWARDER_PARSE_CONFIG,
   makeCallXdr,
+  makeForwarderWrap,
   makeWrap,
   MARKET_FEED_ID,
   OTHER_CONTRACT,
   PARSE_CONFIG,
   ROUTER,
+  SOURCE,
   USER,
+  withArg,
 } from './helpers';
 
 describe('decodeCallXdrs', () => {
@@ -161,5 +170,202 @@ describe('parseCallOutcome', () => {
   test('maps host failures to the untyped sentinel', () => {
     const raw = xdr.ScVal.scvError(xdr.ScError.sceAuth(xdr.ScErrorCode.scecInvalidAction()));
     expect(parseCallOutcome(raw)).toEqual({ ok: false, value: undefined, error: 0xffffffff });
+  });
+});
+
+/** `func` invoking a different entry point with the same args. */
+function withEntry(func: xdr.HostFunction, functionName: string): xdr.HostFunction {
+  const invocation = func.invokeContract();
+  return xdr.HostFunction.hostFunctionTypeInvokeContract(
+    new xdr.InvokeContractArgs({ contractAddress: invocation.contractAddress(), functionName, args: invocation.args() })
+  );
+}
+
+/** `func` with `target_args` replaced. */
+function withTargetArgs(func: xdr.HostFunction, targetArgs: xdr.ScVal[]): xdr.HostFunction {
+  return withArg(func, FORWARDER_SLOT.targetArgs, xdr.ScVal.scvVec(targetArgs));
+}
+
+describe('buildForwarderWrap', () => {
+  test('wraps the calls route in forward → multicall with the configured recipient', () => {
+    const invocation = makeForwarderWrap('calls').invokeContract();
+    expect(Address.fromScAddress(invocation.contractAddress()).toString()).toBe(FORWARDER);
+    expect(invocation.functionName().toString()).toBe('forward');
+    const args = invocation.args();
+    expect(args).toHaveLength(9);
+    expect(Address.fromScVal(args[FORWARDER_SLOT.feeToken]!).toString()).toBe(FEE_TOKEN);
+    expect(scValToNative(args[FORWARDER_SLOT.feeAmount]!)).toBe(PLACEHOLDER_FEE_AMOUNT_ATOMIC);
+    expect(scValToNative(args[FORWARDER_SLOT.maximumFee]!)).toBe(1_000_000n);
+    expect(args[FORWARDER_SLOT.feeExpiration]!.u32()).toBe(1_000);
+    expect(Address.fromScVal(args[FORWARDER_SLOT.targetContract]!).toString()).toBe(ROUTER);
+    expect(args[FORWARDER_SLOT.targetFunction]!.sym().toString()).toBe('multicall');
+    expect(args[FORWARDER_SLOT.targetArgs]!.vec()).toHaveLength(1);
+    expect(Address.fromScVal(args[FORWARDER_SLOT.user]!).toString()).toBe(USER);
+    expect(Address.fromScVal(args[FORWARDER_SLOT.feeRecipient]!).toString()).toBe(FEE_RECIPIENT);
+  });
+
+  test.each([
+    ['fill', 'create_and_fill'],
+    ['try-fill', 'create_and_try_fill'],
+  ] as const)('wraps %s in forward_unsafe → %s with keeper and price in target_args', (route, target) => {
+    const market = Uint8Array.from([9, 9, 9]);
+    const invocation = makeForwarderWrap(route, { market }).invokeContract();
+    expect(invocation.functionName().toString()).toBe('forward_unsafe');
+    const args = invocation.args();
+    expect(args[FORWARDER_SLOT.targetFunction]!.sym().toString()).toBe(target);
+    const targetArgs = args[FORWARDER_SLOT.targetArgs]!.vec()!;
+    expect(targetArgs).toHaveLength(4);
+    expect(targetArgs[TARGET_SLOT.calls]!.vec()).toHaveLength(1);
+    expect(Address.fromScVal(targetArgs[TARGET_SLOT.user]!).toString()).toBe(USER);
+    expect(Address.fromScVal(targetArgs[TARGET_SLOT.keeper]!).toString()).toBe(USER);
+    expect(Buffer.from(targetArgs[TARGET_SLOT.priceUpdate]!.bytes())).toEqual(Buffer.from(market));
+  });
+});
+
+describe('authProjection', () => {
+  const xdrOf = (values: xdr.ScVal[]) => values.map((value) => value.toXDR('base64'));
+
+  test('pins calls and the fee terms of a Router wrap', () => {
+    const args = makeWrap('fill').invokeContract().args();
+    expect(xdrOf(authProjection(makeWrap('fill'), 'router'))).toEqual(xdrOf([args[0]!, args[2]!, args[3]!, args[4]!]));
+  });
+
+  test('forward pins the fee terms, recipient, target, and target args', () => {
+    const wrap = makeForwarderWrap('calls');
+    const args = wrap.invokeContract().args();
+    expect(xdrOf(authProjection(wrap, 'forwarder'))).toEqual(
+      xdrOf([args[0]!, args[2]!, args[3]!, args[8]!, args[4]!, args[5]!, args[6]!])
+    );
+  });
+
+  test('forward_unsafe leaves target args out', () => {
+    const wrap = makeForwarderWrap('try-fill');
+    const args = wrap.invokeContract().args();
+    expect(xdrOf(authProjection(wrap, 'forwarder'))).toEqual(
+      xdrOf([args[0]!, args[2]!, args[3]!, args[8]!, args[4]!, args[5]!])
+    );
+  });
+});
+
+describe('parseSubmitRequest (forwarder mode)', () => {
+  const parse = (func: xdr.HostFunction, feedId?: string) =>
+    parseSubmitRequest({ func, auth: [], feedId }, FORWARDER_PARSE_CONFIG);
+
+  test('accepts the calls route and extracts the fee terms', () => {
+    expect(parse(makeForwarderWrap('calls'))).toMatchObject({
+      mode: 'forwarder',
+      priced: false,
+      user: USER,
+      feeRateBps: 30,
+      maximumFeeAtomic: 1_000_000n,
+      feeExpiration: 1_000,
+      feedId: null,
+    });
+  });
+
+  test.each(['fill', 'try-fill'] as const)('accepts a priced %s wrap with a feedId', (route) => {
+    const parsed = parse(makeForwarderWrap(route), MARKET_FEED_ID);
+    expect(parsed).toMatchObject({ mode: 'forwarder', priced: true, feedId: MARKET_FEED_ID });
+  });
+
+  test('rejects a priced wrap without a feedId', () => {
+    expect(() => parse(makeForwarderWrap('fill'))).toThrow('Priced relay func requires a feedId');
+  });
+
+  test('rejects a Router *_with_fee wrap', () => {
+    expect(() => parse(makeWrap('calls'))).toThrow('Relay target must be the configured fee forwarder contract');
+  });
+
+  test('router mode rejects a forwarder wrap', () => {
+    expect(() => parseSubmitRequest({ func: makeForwarderWrap('calls'), auth: [] }, PARSE_CONFIG)).toThrow(
+      'Relay target must be the configured Router contract'
+    );
+  });
+
+  test('rejects another forwarder entry point', () => {
+    expect(() => parse(withEntry(makeForwarderWrap('calls'), 'forward_all'))).toThrow(
+      'Relay accepts only the fee forwarder forward entry points'
+    );
+  });
+
+  test('rejects a wrap with the wrong arity', () => {
+    const invocation = makeForwarderWrap('calls').invokeContract();
+    const func = xdr.HostFunction.hostFunctionTypeInvokeContract(
+      new xdr.InvokeContractArgs({
+        contractAddress: invocation.contractAddress(),
+        functionName: invocation.functionName(),
+        args: invocation.args().slice(0, 8),
+      })
+    );
+    expect(() => parse(func)).toThrow('Relay accepts only the fee forwarder forward entry points');
+  });
+
+  test('rejects a forward target other than the configured Router', () => {
+    const func = withArg(
+      makeForwarderWrap('calls'),
+      FORWARDER_SLOT.targetContract,
+      Address.fromString(OTHER_CONTRACT).toScVal()
+    );
+    expect(() => parse(func)).toThrow('Relay forward target must be the configured Router contract');
+  });
+
+  test.each(['transfer_from', 'burn_from', 'multicall_with_fee'])('rejects the target function %s', (name) => {
+    const func = withArg(makeForwarderWrap('calls'), FORWARDER_SLOT.targetFunction, xdr.ScVal.scvSymbol(name));
+    expect(() => parse(func)).toThrow('Relay forward target function does not match its forwarder entry point');
+  });
+
+  test('rejects a priced target under forward, whose target args are signed', () => {
+    expect(() => parse(withEntry(makeForwarderWrap('fill'), 'forward'), MARKET_FEED_ID)).toThrow(
+      'does not match its forwarder entry point'
+    );
+  });
+
+  test('rejects multicall under forward_unsafe, which would leave the batch unsigned', () => {
+    expect(() => parse(withEntry(makeForwarderWrap('calls'), 'forward_unsafe'))).toThrow(
+      'does not match its forwarder entry point'
+    );
+  });
+
+  test('rejects target args that do not match the Router function', () => {
+    const wrap = makeForwarderWrap('fill');
+    const targetArgs = wrap.invokeContract().args()[FORWARDER_SLOT.targetArgs]!.vec()!;
+    expect(() => parse(withTargetArgs(wrap, targetArgs.slice(0, 3)), MARKET_FEED_ID)).toThrow(
+      'Relay forward target args must match the Router function exactly'
+    );
+  });
+
+  test('rejects a batch that is not a vector of Router Calls', () => {
+    expect(() => parse(withTargetArgs(makeForwarderWrap('calls'), [xdr.ScVal.scvU32(1)]))).toThrow(
+      'Relay calls must be a vector of Router Calls'
+    );
+  });
+
+  test('rejects a fill aimed at another user', () => {
+    const wrap = makeForwarderWrap('try-fill');
+    const targetArgs = wrap.invokeContract().args()[FORWARDER_SLOT.targetArgs]!.vec()!.slice();
+    targetArgs[TARGET_SLOT.user] = Address.fromString(SOURCE).toScVal();
+    expect(() => parse(withTargetArgs(wrap, targetArgs), MARKET_FEED_ID)).toThrow(
+      'Relay fill user must be the signing user'
+    );
+  });
+
+  test('rejects a recipient other than the configured one', () => {
+    const func = withArg(makeForwarderWrap('calls'), FORWARDER_SLOT.feeRecipient, Address.fromString(SOURCE).toScVal());
+    expect(() => parse(func)).toThrow('Relay fee recipient is not the configured recipient');
+  });
+
+  test('rejects a fee token that is not the configured one', () => {
+    const func = withArg(
+      makeForwarderWrap('calls'),
+      FORWARDER_SLOT.feeToken,
+      Address.fromString(OTHER_CONTRACT).toScVal()
+    );
+    expect(() => parse(func)).toThrow('Relay fee token is not an enabled collateral token');
+  });
+
+  test('rejects a non-positive signed fee cap', () => {
+    expect(() => parse(makeForwarderWrap('calls', { maximumFeeAtomic: 0n }))).toThrow(
+      'Relay fee envelope is outside configured bounds'
+    );
   });
 });

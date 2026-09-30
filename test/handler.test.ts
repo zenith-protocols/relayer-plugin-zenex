@@ -1,12 +1,14 @@
 import { describe, test, expect, beforeEach, afterAll, vi } from 'vitest';
-import { xdr } from '@stellar/stellar-sdk';
+import { Address, scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { PluginContext, Relayer } from '@openzeppelin/relayer-sdk';
 import {
   FEE_RECIPIENT,
   FEE_TOKEN,
+  FORWARDER,
   makeAuthEntry,
   makeCallXdr,
   makeFakeRelayer,
+  makeForwarderWrap,
   makeWrap,
   MARKET_FEED_ID,
   OTHER_CONTRACT,
@@ -16,6 +18,7 @@ import {
   XLM_FEED_ID,
 } from './helpers';
 import { DATASTREAMS } from '../src/plugin/constants';
+import { FORWARDER_SLOT } from '../src/plugin/parse';
 
 const channelsHandler = vi.fn();
 vi.mock('@openzeppelin/relayer-plugin-channels', () => ({
@@ -66,7 +69,7 @@ function makeContext(
   route: string,
   params: unknown,
   relayer: Relayer,
-  overrides: { address?: string; networkType?: string } = {}
+  overrides: { address?: string; networkType?: string; config?: Record<string, unknown> } = {}
 ): PluginContext {
   const withInfo = {
     ...(relayer as object),
@@ -78,7 +81,7 @@ function makeContext(
   return {
     route,
     params,
-    config: pluginConfig(),
+    config: overrides.config ?? pluginConfig(),
     api: { useRelayer: vi.fn(() => withInfo) },
   } as unknown as PluginContext;
 }
@@ -230,5 +233,69 @@ describe('submit route', () => {
     await handler(context);
     const fundRelayer = (context.api.useRelayer as ReturnType<typeof vi.fn>).mock.results[0]!.value;
     expect(fundRelayer.getRelayer).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('forwarder mode', () => {
+  const forwarderConfig = () => ({ ...pluginConfig(), forwarder: FORWARDER });
+
+  test('prepares the calls route as a forwarder wrap', async () => {
+    const wrap = makeForwarderWrap('calls');
+    const relayer = makeFakeRelayer({
+      record: {
+        auth: [makeAuthEntry(wrap, USER, { mode: 'forwarder' })],
+        retval: xdr.ScVal.scvVec([]),
+        latestLedger: 100,
+      },
+    });
+    const context = makeContext(
+      '/prepare/calls',
+      {
+        user: USER,
+        calls: [makeCallXdr(OTHER_CONTRACT, 'transfer')],
+        expirationLedger: 1_000,
+        maxFeeAmountAtomic: '1000000',
+      },
+      relayer,
+      { config: forwarderConfig() }
+    );
+
+    const result = (await handler(context)) as { func: string; authEntries: unknown[] };
+    expect(result.func).toBe(wrap.toXDR('base64').toString());
+    expect(result.authEntries).toHaveLength(1);
+  });
+
+  test('submits the repriced forwarder call with the signed recipient intact', async () => {
+    fetchRelayPrices.mockResolvedValueOnce({ xlmUsd: 0.5, marketUpdate: null });
+    channelsHandler.mockResolvedValueOnce({ transactionId: 'tx-1', status: 'submitted', hash: null });
+
+    const wrap = makeForwarderWrap('calls');
+    const signed = makeAuthEntry(wrap, USER, { expiration: 1_000, mode: 'forwarder' });
+    const relayer = makeFakeRelayer({ enforce: { minResourceFee: '1000000', latestLedger: 100 } });
+    const context = makeContext(
+      '/submit',
+      { func: wrap.toXDR('base64').toString(), auth: [signed.toXDR('base64').toString()] },
+      relayer,
+      { config: forwarderConfig() }
+    );
+
+    await expect(handler(context)).resolves.toEqual({ transactionId: 'tx-1', status: 'submitted', hash: null });
+    const params = (channelsHandler.mock.calls[0]![0] as PluginContext).params as { func: string; auth: string[] };
+    const args = xdr.HostFunction.fromXDR(params.func, 'base64').invokeContract().args();
+    expect(scValToNative(args[FORWARDER_SLOT.feeAmount]!)).toBe(1_500n);
+    expect(Address.fromScVal(args[FORWARDER_SLOT.feeRecipient]!).toString()).toBe(FEE_RECIPIENT);
+    expect(params.auth).toEqual([signed.toXDR('base64').toString()]);
+  });
+
+  test('rejects a Router *_with_fee wrap at submit', async () => {
+    const wrap = makeWrap('calls');
+    const context = makeContext(
+      '/submit',
+      { func: wrap.toXDR('base64').toString(), auth: [makeAuthEntry(wrap, USER).toXDR('base64').toString()] },
+      makeFakeRelayer({}),
+      { config: forwarderConfig() }
+    );
+    await expect(handler(context)).rejects.toThrow('Relay target must be the configured fee forwarder contract');
+    expect(channelsHandler).not.toHaveBeenCalled();
   });
 });

@@ -7,7 +7,7 @@
 import { Address, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import { pluginError, Relayer } from '@openzeppelin/relayer-sdk';
 import { HTTP_STATUS, RELAY } from './constants';
-import { PLACEHOLDER_FEE_AMOUNT_ATOMIC, ROUTER_SLOT } from './parse';
+import { FORWARDER_SLOT, PLACEHOLDER_FEE_AMOUNT_ATOMIC, ROUTER_SLOT, TARGET_SLOT } from './parse';
 import { RelayPrices } from './pricing';
 import { simulateFinal } from './simulation';
 import { ParsedRelayCall } from './types';
@@ -30,12 +30,25 @@ function withTail(
 ): xdr.HostFunction {
   const invoke = parsed.func.invokeContract();
   const args = invoke.args().slice();
-  args[ROUTER_SLOT.feeAmount] = nativeToScVal(feeAtomic, { type: 'i128' });
-  args[ROUTER_SLOT.feeRecipient] = Address.fromString(feeRecipient).toScVal();
-  if (parsed.priced) {
-    // keeper = the func's own user slot: the fill reward round-trips.
-    args[ROUTER_SLOT.keeper] = args[ROUTER_SLOT.user]!;
-    args[ROUTER_SLOT.priceUpdate] = xdr.ScVal.scvBytes(Buffer.from(priceUpdate!));
+  if (parsed.mode === 'forwarder') {
+    // The recipient is in the user's signed projection, which parse pinned to the configured one: it
+    // never changes here. Only the fee and a priced wrap's keeper and price are relay-owned.
+    args[FORWARDER_SLOT.feeAmount] = nativeToScVal(feeAtomic, { type: 'i128' });
+    if (parsed.priced) {
+      const targetArgs = (args[FORWARDER_SLOT.targetArgs]!.vec() ?? []).slice();
+      // keeper = the func's own user slot: the fill reward round-trips.
+      targetArgs[TARGET_SLOT.keeper] = args[FORWARDER_SLOT.user]!;
+      targetArgs[TARGET_SLOT.priceUpdate] = xdr.ScVal.scvBytes(Buffer.from(priceUpdate!));
+      args[FORWARDER_SLOT.targetArgs] = xdr.ScVal.scvVec(targetArgs);
+    }
+  } else {
+    args[ROUTER_SLOT.feeAmount] = nativeToScVal(feeAtomic, { type: 'i128' });
+    args[ROUTER_SLOT.feeRecipient] = Address.fromString(feeRecipient).toScVal();
+    if (parsed.priced) {
+      // keeper = the func's own user slot: the fill reward round-trips.
+      args[ROUTER_SLOT.keeper] = args[ROUTER_SLOT.user]!;
+      args[ROUTER_SLOT.priceUpdate] = xdr.ScVal.scvBytes(Buffer.from(priceUpdate!));
+    }
   }
   return xdr.HostFunction.hostFunctionTypeInvokeContract(
     new xdr.InvokeContractArgs({

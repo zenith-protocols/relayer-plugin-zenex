@@ -3,7 +3,7 @@ import { Networks } from '@stellar/stellar-sdk';
 import type { PluginContext } from '@openzeppelin/relayer-sdk';
 import { dataStreamsAccess, loadConfig, relayParseConfig } from '../src/plugin/config';
 import { DATASTREAMS } from '../src/plugin/constants';
-import { FEE_RECIPIENT, FEE_TOKEN, ROUTER, XLM_FEED_ID } from './helpers';
+import { FEE_RECIPIENT, FEE_TOKEN, FORWARDER, ROUTER, XLM_FEED_ID } from './helpers';
 
 const ENV_KEYS = ['STELLAR_NETWORK', 'FUND_RELAYER_ID', 'DS_USER_ID', 'DS_HMAC_SECRET'] as const;
 const OPTIONAL_ENV_KEYS = ['DS_API_HOST'] as const;
@@ -131,6 +131,28 @@ describe('loadConfig', () => {
     expect(loaded.fundRelayerId).toBe('channels-fund');
   });
 
+  test('loads forwarder mode when a forwarder is configured', () => {
+    const config = validPluginConfig();
+    config.forwarder = `  ${FORWARDER}  `;
+    expect(loadConfig(contextWith(config)).forwarder).toBe(FORWARDER);
+  });
+
+  test('leaves forwarder unset in router mode', () => {
+    expect(loadConfig(contextWith(validPluginConfig()))).not.toHaveProperty('forwarder');
+  });
+
+  test.each(['', '   ', 7])('rejects an invalid forwarder: %j', (forwarder) => {
+    const config = validPluginConfig();
+    config.forwarder = forwarder;
+    expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: forwarder');
+  });
+
+  test('rejects a forwarder that is the Router itself', () => {
+    const config = validPluginConfig();
+    config.forwarder = ROUTER;
+    expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: forwarder');
+  });
+
   test('rejects the retired session block as an unknown key', () => {
     const config = validPluginConfig();
     config.session = { policy: ROUTER };
@@ -143,6 +165,16 @@ describe('relayParseConfig', () => {
     const config = loadConfig(contextWith(validPluginConfig()));
     expect(relayParseConfig(config)).toEqual({
       router: ROUTER,
+      feeToken: { contractId: FEE_TOKEN, decimals: 7, feeRateBps: 30 },
+    });
+  });
+
+  test('carries the forwarder and its signed recipient in forwarder mode', () => {
+    const config = validPluginConfig();
+    config.forwarder = FORWARDER;
+    expect(relayParseConfig(loadConfig(contextWith(config)))).toEqual({
+      router: ROUTER,
+      forwarder: { contract: FORWARDER, feeRecipient: FEE_RECIPIENT },
       feeToken: { contractId: FEE_TOKEN, decimals: 7, feeRateBps: 30 },
     });
   });

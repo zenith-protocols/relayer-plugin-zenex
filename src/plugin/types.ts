@@ -16,7 +16,10 @@ export interface Call {
 /** The prepare route, which selects the Router wrap and its return ABI. */
 export type RelayPrepareRoute = 'calls' | 'fill' | 'try-fill';
 
-/** The prefix of every Router `*_with_fee` wrap — what the user authorizes. */
+/**
+ * The request fields every wrap carries: the Router `*_with_fee` prefix the user authorizes, and in
+ * forwarder mode the fee terms, user, and Router batch of the forwarder wrap.
+ */
 export type RouterWrapPrefix = {
   calls: Call[];
   user: string;
@@ -33,15 +36,33 @@ export type RouterWrapTail = {
   priceUpdate?: Uint8Array;
 };
 
-// Submit-side policy: the configured Router at exact arity and the configured fee token.
+/**
+ * The relay-supplied unsigned part of a forwarder wrap: the fee, plus keeper+price inside a priced
+ * wrap's `target_args`. The recipient is not in it — the user signs the forwarder's recipient.
+ */
+export type ForwarderWrapTail = Omit<RouterWrapTail, 'feeRecipient'>;
+
+/** Forwarder mode: the fee forwarder every relayed func targets, and the recipient its users sign. */
+export type ForwarderPolicy = {
+  contract: string;
+  feeRecipient: string;
+};
+
+/** Router mode wraps the calls in a Router `*_with_fee`; forwarder mode in the fee forwarder's `forward*`. */
+export type RelayMode = 'router' | 'forwarder';
+
+// Submit-side policy: the configured Router (or forwarder) at exact arity and the configured fee token.
 // Inner calls pass through untouched — the user pays the relay fee, and Soroban
 // auth enforces what their signature grants on-chain.
 export type RelayParseConfig = {
   router: string;
+  /** Present selects forwarder mode; absent keeps the Router `*_with_fee` mode. */
+  forwarder?: ForwarderPolicy;
   feeToken: { contractId: string; decimals: number; feeRateBps: number };
 };
 
 export interface ParsedRelayCall {
+  mode: RelayMode;
   priced: boolean;
   user: string;
   feeRateBps: number;

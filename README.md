@@ -2,7 +2,8 @@
 
 OpenZeppelin Relayer plugin for the Zenex transaction relay. It prepares and
 submits router transactions (auth discovery, Chainlink Data Streams report
-injection, fee enforcement) and delegates final submission to the embedded
+injection, fee enforcement), optionally through a fee forwarder, and delegates
+final submission to the embedded
 `@openzeppelin/relayer-plugin-channels` handler in-process. The package also
 ships `ZenexClient`, a typed client for the plugin's routes.
 
@@ -95,6 +96,7 @@ Then add the signers, relayers, and the plugin entry to your relayer's
       "emit_logs": false,
       "config": {
         "router": "C...ROUTER",
+        "forwarder": "C...FORWARDER", // optional: see Forwarder mode
         "feeRecipient": "G...RECIPIENT",
         "fees": {
           "feeRateBps": 30,
@@ -121,6 +123,26 @@ same environment catalog as the host (`STELLAR_NETWORK` selects
 `DS_API_HOST` overrides it). `feeRecipient` must be able to hold the fee token
 (for a SAC-wrapped asset like USDC, a `G...` recipient needs the trustline) —
 otherwise every relayed transaction fails at the fee transfer.
+
+### Forwarder mode
+
+Set `forwarder` (a fee forwarder contract ID) to wrap relays in the forwarder
+instead of the Router's `*_with_fee` entry points. `router` stays: it becomes
+the forwarder's target.
+
+```text
+calls            forward(fee_token, fee_amount, max_fee_amount, expiration_ledger,
+                         router, "multicall", [calls], user, fee_recipient)
+fill, try-fill   forward_unsafe(<same>, router, "create_and_[try_]fill",
+                                [calls, user, keeper, price], user, fee_recipient)
+```
+
+`forward` signs the batch. `forward_unsafe` leaves `target_args` unsigned, so
+submit can put in the keeper and a fresh Data Streams report. The user signs
+`fee_recipient` in both: prepare puts the configured `feeRecipient` in, and
+submit rejects any other and rewrites only `fee_amount` (plus keeper and price
+on priced routes). Without `forwarder` the plugin runs the Router mode exactly
+as before.
 
 Keep `emit_logs` off outside development: the plugin envelope returns emitted
 logs to the caller in `metadata.logs`, which includes raw simulation
@@ -178,7 +200,7 @@ API_KEY=<your-key> npx tsx scripts/smoke.ts
 ```
 
 The script friendbots a throwaway user, prepares an XLM self-transfer through
-`multicall_with_fee` using `ZenexClient`, signs the returned auth entry,
+the calls route using `ZenexClient`, signs the returned auth entry,
 submits, polls until the transaction lands, and prints the on-chain result.
 `on-chain: SUCCESS` means the full pipeline works.
 

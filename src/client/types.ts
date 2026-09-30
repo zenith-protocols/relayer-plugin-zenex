@@ -84,7 +84,7 @@ export interface ZenexPrepareOutcome {
  * Response from the prepare routes
  */
 export interface ZenexPrepareResponse {
-  /** The prepared Router HostFunction XDR, base64-encoded; round-trip it to submit */
+  /** The prepared wrap (Router, or the fee forwarder in forwarder mode) HostFunction XDR, base64-encoded; round-trip it to submit */
   func: string;
   /** Authorization entries the user must sign */
   authEntries: ZenexPreparedAuthEntry[];
