@@ -1,8 +1,9 @@
 # @zenith-protocols/relayer-plugin-zenex
 
 OpenZeppelin Relayer plugin for the Zenex transaction relay. It prepares and
-submits router transactions (auth discovery, Chainlink Data Streams report
-injection, fee enforcement) and delegates final submission to the embedded
+submits Router calls through the Zenex fee forwarder (auth discovery, Chainlink
+Data Streams report injection, fee enforcement) and delegates final submission
+to the embedded
 `@openzeppelin/relayer-plugin-channels` handler in-process. The package also
 ships `ZenexClient`, a typed client for the plugin's routes.
 
@@ -95,6 +96,7 @@ Then add the signers, relayers, and the plugin entry to your relayer's
       "emit_logs": false,
       "config": {
         "router": "C...ROUTER",
+        "forwarder": "C...FORWARDER",
         "feeRecipient": "G...RECIPIENT",
         "fees": {
           "feeRateBps": 30,
@@ -118,9 +120,11 @@ Streams feed id: `0x0003…` bytes32 hex) per request. `xlmUsdFeedId` is the
 XLM/USD stream the relay prices its fee conversion with; it must come from the
 same environment catalog as the host (`STELLAR_NETWORK` selects
 `api.testnet-dataengine.chain.link` or `api.dataengine.chain.link`, unless
-`DS_API_HOST` overrides it). `feeRecipient` must be able to hold the fee token
-(for a SAC-wrapped asset like USDC, a `G...` recipient needs the trustline) —
-otherwise every relayed transaction fails at the fee transfer.
+`DS_API_HOST` overrides it). `forwarder` is the fee forwarder every relay goes
+through, and `router` the Router it calls. `feeRecipient` is the recipient users
+sign in every forward; it must be able to hold the fee token (for a SAC-wrapped
+asset like USDC, a `G...` recipient needs the trustline) — otherwise every
+relayed transaction fails at the fee transfer.
 
 Keep `emit_logs` off outside development: the plugin envelope returns emitted
 logs to the caller in `metadata.logs`, which includes raw simulation
@@ -178,7 +182,7 @@ API_KEY=<your-key> npx tsx scripts/smoke.ts
 ```
 
 The script friendbots a throwaway user, prepares an XLM self-transfer through
-`multicall_with_fee` using `ZenexClient`, signs the returned auth entry,
+the calls route using `ZenexClient`, signs the returned auth entry,
 submits, polls until the transaction lands, and prints the on-chain result.
 `on-chain: SUCCESS` means the full pipeline works.
 
@@ -244,6 +248,21 @@ on the bare route; in direct mode it posts to the edge service's `/status`.
 - `/submit` — submit signed auth entries; answers channels' response verbatim:
   `{transactionId, status, hash}` with `hash` usually still `null`
 
+Each prepare route wraps the Router call in the fee forwarder:
+
+```text
+calls            forward(fee_token, fee_amount, max_fee_amount, expiration_ledger,
+                         router, "multicall", [calls], user, fee_recipient)
+fill, try-fill   forward_dynamic(<same>, router, "create_and_[try_]fill",
+                                [calls, user, keeper, price], user, fee_recipient)
+```
+
+`forward` signs the batch. `forward_dynamic` leaves `target_args` unsigned, so
+submit can put in the keeper and a fresh Data Streams report. Both sign
+`fee_recipient`: prepare puts the configured `feeRecipient` in, and submit
+rejects any other and rewrites only `fee_amount` (at least 1, plus keeper and
+price on priced routes).
+
 Status polling has no plugin route: the returned `transactionId` is looked up
 on the relayer's core transactions API
 (`GET /api/v1/relayers/{fundRelayerId}/transactions/{transactionId}` — the
@@ -266,7 +285,7 @@ supported way to do raw channel submission alongside this plugin. Channels'
 own strict validation and `adminSecret` gate own that surface; its errors
 propagate unmapped. Any other route is a 404.
 
-**Edge contract:** raw submission is unpoliced sponsorship (no Router gate, no
+**Edge contract:** raw submission is unpoliced sponsorship (no forwarder gate, no
 fee), so the Cloudflare Worker in front of the relayer must forward only
 `/call/prepare/*` and `/call/submit` to the public internet, and serve status
 polling itself by calling the core transactions API with its key (the client
@@ -279,24 +298,24 @@ caller.
 
 Inner-call targets and arguments pass through without plugin policy
 validation — the wrapper itself is still checked: `parseSubmitRequest` pins the
-Router target, the `*_with_fee` ABI at exact arity, the fee envelope, and the
-structure of every inner call it decodes. What it does not do is judge what
-those calls point at or carry.
+fee forwarder at exact arity, the route's entry point and Router function, the
+configured Router as the target, the configured recipient and fee token, the fee
+envelope, the fill user, and the structure of every inner call it decodes. What
+it does not do is judge what those calls point at or carry.
 
-Soroban auth is their gate: the user's
-signature covers the inner calls together with the fee constraints — the call
-vector, the fee token, the fee cap, and the fee expiration ledger (the Router
-auth projection, args 0/2/3/4). Within those constraints the relay fills the
-tail it must compute itself: the actual fee amount (rejected if it exceeds the
-signed cap), the fee recipient, the keeper, and the price report. So the user
-does not sign the final wrapper byte-for-byte; they sign what the calls do and
-the most they can be charged for it.
+Soroban auth is their gate: the user signs the fee token, the fee cap, the fee
+expiration ledger, the recipient, and the Router target and function, plus the
+batch itself under `forward`. Every inner call that needs the user's
+authorization is part of the same signed tree. Within those constraints the
+relay fills what it must compute itself: the actual fee amount (rejected if it
+exceeds the signed cap), the keeper, and the price report. So the user does not
+sign the final wrapper byte-for-byte; they sign what the calls do and the most
+they can be charged for it.
 
-The relay validates its own transaction shape (the Router `*_with_fee` entry
-points at exact arity, the configured fee token, the fee envelope) and nothing
-about the inner calls' targets or arguments — the user pays the relay fee for
-whatever they submit. Smart-account mutations such as `add_context_rule` are
-the user's own business on the user's own account.
+The relay validates its own transaction shape and nothing about the inner
+calls' targets or arguments — the user pays the relay fee for whatever they
+submit. Smart-account mutations such as `add_context_rule` are the user's own
+business on the user's own account.
 
 ## Deployment constraints
 

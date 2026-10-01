@@ -80,7 +80,7 @@ export class ZenexClient {
   }
 
   /**
-   * Prepare an unpriced multicall (`multicall_with_fee`)
+   * Prepare an unpriced multicall (the fee forwarder's `forward` → the Router's `multicall`)
    *
    * @param request Prepare request with the user, calls, expiration, and fee cap
    * @returns The prepared func, auth entries to sign, and the decoded simulation outcome
@@ -101,7 +101,7 @@ export class ZenexClient {
   }
 
   /**
-   * Prepare a priced fill (`create_and_fill_with_fee`); `feedId` is required
+   * Prepare a priced fill (`forward_dynamic` → `create_and_fill`); `feedId` is required
    *
    * @param request Prepare request; `calls[0]` must be `create_order`
    * @returns The prepared func, auth entries to sign, and the decoded fill outcome
@@ -114,7 +114,7 @@ export class ZenexClient {
   }
 
   /**
-   * Prepare a priced try-fill (`create_and_try_fill_with_fee`); `feedId` is required
+   * Prepare a priced try-fill (`forward_dynamic` → `create_and_try_fill`); `feedId` is required
    *
    * @param request Prepare request with the user, calls, expiration, and fee cap
    * @returns The prepared func, auth entries to sign, and the decoded outcome

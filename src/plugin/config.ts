@@ -14,9 +14,11 @@ import { RelayParseConfig } from './types';
 export const FEED_ID_PATTERN = /^0x0003[0-9a-fA-F]{60}$/i;
 
 export interface ZenexConfig {
-  /** The Router contract every relayed func must target. */
+  /** The Router contract the fee forwarder calls for every relay. */
   router: string;
-  /** Spliced into relay-owned tails: a Stellar account or contract. */
+  /** The fee forwarder contract every relay goes through: its `forward` / `forward_dynamic`. */
+  forwarder: string;
+  /** The recipient users sign in every forward. A Stellar account or contract that can hold the fee token. */
   feeRecipient: string;
   feeRateBps: number;
   feeTokenContractId: string;
@@ -85,7 +87,7 @@ export function loadConfig(context: PluginContext): ZenexConfig {
   const config = (context.config ?? {}) as Record<string, unknown>;
   const fees = (config.fees ?? {}) as Record<string, unknown>;
   const feeToken = (fees.feeToken ?? {}) as Record<string, unknown>;
-  rejectUnknownKeys(config, ['router', 'feeRecipient', 'fees', 'xlmUsdFeedId'], '');
+  rejectUnknownKeys(config, ['router', 'forwarder', 'feeRecipient', 'fees', 'xlmUsdFeedId'], '');
   rejectUnknownKeys(fees, ['feeRateBps', 'feeToken'], 'fees');
   rejectUnknownKeys(feeToken, ['contractId', 'decimals'], 'fees.feeToken');
   const feeRateBps = fees.feeRateBps;
@@ -103,8 +105,14 @@ export function loadConfig(context: PluginContext): ZenexConfig {
     });
   }
 
+  const router = requireConfigString(config.router, 'router');
+  const forwarder = requireConfigString(config.forwarder, 'forwarder');
+  // The forwarder wraps the Router; one contract in both roles is a misconfiguration.
+  if (forwarder === router) configInvalid('forwarder');
+
   return {
-    router: requireConfigString(config.router, 'router'),
+    router,
+    forwarder,
     feeRecipient: requireConfigString(config.feeRecipient, 'feeRecipient'),
     feeRateBps,
     feeTokenContractId: requireConfigString(feeToken.contractId, 'fees.feeToken.contractId'),
@@ -187,6 +195,8 @@ export function dataStreamsAccess(config: ZenexConfig): DataStreamsAccess {
 export function relayParseConfig(config: ZenexConfig): RelayParseConfig {
   return {
     router: config.router,
+    forwarder: config.forwarder,
+    feeRecipient: config.feeRecipient,
     feeToken: {
       contractId: config.feeTokenContractId,
       decimals: config.feeTokenDecimals,

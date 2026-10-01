@@ -1,19 +1,20 @@
 /**
  * prepare.ts
  *
- * Prepare pipeline: build the Router wrap, run one auth-discovery simulation,
- * and return the func, stamped user auth entries, and decoded outcome.
+ * Prepare pipeline: build the route's fee forwarder call around the Router call, run one auth-discovery
+ * simulation, and return the func, stamped user auth entries, and decoded outcome.
  */
 
 import { Address, hash, scValToNative, xdr } from '@stellar/stellar-sdk';
 import { pluginError, Relayer } from '@openzeppelin/relayer-sdk';
 import { HTTP_STATUS, RELAY } from './constants';
 import {
-  buildRouterWrap,
+  buildWrap,
   decodeCallXdrs,
   invalidParams,
   parseCallOutcome,
   PLACEHOLDER_FEE_AMOUNT_ATOMIC,
+  signedArgs,
 } from './parse';
 import { simulateDiscovery } from './simulation';
 import {
@@ -59,7 +60,10 @@ function jsonOutcome(raw: xdr.ScVal): { ok: boolean; value: unknown; error: numb
   return { ok: outcome.ok, value: jsonSafe(outcome.value ?? null), error: outcome.error };
 }
 
-/** Decode a discovery-sim `retval` (Router `Vec<Val>`; fill/try-fill append the fill outcome last). */
+/**
+ * Decode a discovery-sim `retval`: the forwarder returns the Router's `Vec<Val>` unchanged (fill/try-fill
+ * append the fill outcome last).
+ */
 function decodeOutcome(route: RelayPrepareRoute, retval: xdr.ScVal): RelayPrepareOutcome {
   const elements = [...(retval.vec() ?? [])];
   switch (route) {
@@ -75,15 +79,14 @@ function decodeOutcome(route: RelayPrepareRoute, retval: xdr.ScVal): RelayPrepar
   }
 }
 
-/** The Router auth projection the user signs (outer args 0/2/3/4), compared against each entry's root. */
+/** The signed args the user's root auth entry carries, compared against each entry's root. */
 function expectedRootFunctionHex(func: xdr.HostFunction): string {
   const invocation = func.invokeContract();
-  const args = invocation.args();
   return xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
     new xdr.InvokeContractArgs({
       contractAddress: invocation.contractAddress(),
       functionName: invocation.functionName(),
-      args: [args[0]!, args[2]!, args[3]!, args[4]!],
+      args: signedArgs(func),
     })
   ).toXDR('hex');
 }
@@ -119,18 +122,14 @@ export async function prepareRelayEntries(
     maximumFeeAtomic: BigInt(request.maxFeeAmountAtomic),
     feeExpirationLedger: expirationLedger,
   };
-  // Submit prices the real fee off its own simulation and overwrites this tail.
-  const placeholderTail = { feeAmountAtomic: PLACEHOLDER_FEE_AMOUNT_ATOMIC, feeRecipient: user };
-
-  // Priced routes carry a real Data Streams report; keeper = user so the fill reward round-trips.
+  // Submit prices the real fee off its own simulation and overwrites this placeholder. The user signs the
+  // configured recipient. Priced routes carry a real Data Streams report; keeper = user so the fill
+  // reward round-trips.
+  const placeholderTail = { feeAmountAtomic: PLACEHOLDER_FEE_AMOUNT_ATOMIC };
   const func =
     priced && market !== null
-      ? buildRouterWrap(policy.router, route, prefix, {
-          ...placeholderTail,
-          keeper: user,
-          priceUpdate: market,
-        })
-      : buildRouterWrap(policy.router, route, prefix, placeholderTail);
+      ? buildWrap(policy, route, prefix, { ...placeholderTail, keeper: user, priceUpdate: market })
+      : buildWrap(policy, route, prefix, placeholderTail);
 
   const simulation = await simulateDiscovery(func, sourceAccount, relayer, networkPassphrase);
   console.debug(`[zenex] Discovery: auth_count=${simulation.auth.length}, ledger=${simulation.ledger}`);

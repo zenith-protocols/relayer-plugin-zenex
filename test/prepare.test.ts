@@ -1,8 +1,10 @@
 import { describe, test, expect } from 'vitest';
-import { Networks, xdr } from '@stellar/stellar-sdk';
+import { Address, Networks, xdr } from '@stellar/stellar-sdk';
+import { FORWARDER_SLOT } from '../src/plugin/parse';
 import { prepareRelayEntries } from '../src/plugin/prepare';
 import type { RelayPrepareRequest } from '../src/plugin/types';
 import {
+  FEE_RECIPIENT,
   makeAuthEntry,
   makeCallXdr,
   makeFakeRelayer,
@@ -48,6 +50,9 @@ describe('prepareRelayEntries', () => {
     );
 
     expect(result.func).toBe(wrap.toXDR('base64').toString());
+    // The user signs the configured recipient, not a placeholder.
+    const args = xdr.HostFunction.fromXDR(result.func, 'base64').invokeContract().args();
+    expect(Address.fromScVal(args[FORWARDER_SLOT.feeRecipient]!).toString()).toBe(FEE_RECIPIENT);
     // The relay's own source-account entry never travels.
     expect(result.authEntries).toHaveLength(1);
     const entry = result.authEntries[0]!;
@@ -65,7 +70,7 @@ describe('prepareRelayEntries', () => {
     });
   });
 
-  test('builds a priced wrap carrying the market update on try-fill', async () => {
+  test('builds a priced wrap carrying the market update in target_args on try-fill', async () => {
     const wrap = makeWrap('try-fill', { market: MARKET });
     const relayer = makeFakeRelayer({
       record: { auth: [makeAuthEntry(wrap, USER)], retval: xdr.ScVal.scvVec([xdr.ScVal.scvU32(1)]), latestLedger: 100 },
@@ -143,6 +148,20 @@ describe('prepareRelayEntries', () => {
     const foreign = makeAuthEntry(wrap, USER, { rootArgs: [args[0]!, args[2]!, args[3]!] });
     const relayer = makeFakeRelayer({
       record: { auth: [foreign], retval: xdr.ScVal.scvVec([]), latestLedger: 100 },
+    });
+    await expect(
+      prepareRelayEntries('calls', makeRequest(), PARSE_CONFIG, Networks.TESTNET, relayer, SOURCE, null)
+    ).rejects.toMatchObject({ code: 'DISCOVERY_INVOCATION_MISMATCH' });
+  });
+
+  test('fails closed when forward is authorized without its target args', async () => {
+    const wrap = makeWrap('calls');
+    const args = wrap.invokeContract().args();
+    const dynamicEntry = makeAuthEntry(wrap, USER, {
+      rootArgs: [args[0]!, args[2]!, args[3]!, args[8]!, args[4]!, args[5]!],
+    });
+    const relayer = makeFakeRelayer({
+      record: { auth: [dynamicEntry], retval: xdr.ScVal.scvVec([]), latestLedger: 100 },
     });
     await expect(
       prepareRelayEntries('calls', makeRequest(), PARSE_CONFIG, Networks.TESTNET, relayer, SOURCE, null)

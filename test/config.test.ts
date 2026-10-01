@@ -3,7 +3,7 @@ import { Networks } from '@stellar/stellar-sdk';
 import type { PluginContext } from '@openzeppelin/relayer-sdk';
 import { dataStreamsAccess, loadConfig, relayParseConfig } from '../src/plugin/config';
 import { DATASTREAMS } from '../src/plugin/constants';
-import { FEE_RECIPIENT, FEE_TOKEN, ROUTER, XLM_FEED_ID } from './helpers';
+import { FEE_RECIPIENT, FEE_TOKEN, FORWARDER, ROUTER, XLM_FEED_ID } from './helpers';
 
 const ENV_KEYS = ['STELLAR_NETWORK', 'FUND_RELAYER_ID', 'DS_USER_ID', 'DS_HMAC_SECRET'] as const;
 const OPTIONAL_ENV_KEYS = ['DS_API_HOST'] as const;
@@ -12,6 +12,7 @@ const savedEnv = Object.fromEntries([...ENV_KEYS, ...OPTIONAL_ENV_KEYS].map((key
 function validPluginConfig(): Record<string, unknown> {
   return {
     router: ROUTER,
+    forwarder: FORWARDER,
     feeRecipient: FEE_RECIPIENT,
     fees: { feeRateBps: 30, feeToken: { contractId: FEE_TOKEN, decimals: 7 } },
     xlmUsdFeedId: XLM_FEED_ID,
@@ -42,6 +43,7 @@ describe('loadConfig', () => {
     const config = loadConfig(contextWith(validPluginConfig()));
     expect(config).toEqual({
       router: ROUTER,
+      forwarder: FORWARDER,
       feeRecipient: FEE_RECIPIENT,
       feeRateBps: 30,
       feeTokenContractId: FEE_TOKEN,
@@ -87,7 +89,7 @@ describe('loadConfig', () => {
     expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: fees.feeToken.decimals');
   });
 
-  test.each(['router', 'feeRecipient', 'xlmUsdFeedId'] as const)('rejects a missing %s', (field) => {
+  test.each(['router', 'forwarder', 'feeRecipient', 'xlmUsdFeedId'] as const)('rejects a missing %s', (field) => {
     const config = validPluginConfig();
     delete config[field];
     expect(() => loadConfig(contextWith(config))).toThrow(`Invalid plugin config: ${field}`);
@@ -125,10 +127,24 @@ describe('loadConfig', () => {
   test('trims whitespace from config strings and env values', () => {
     const config = validPluginConfig();
     config.router = `  ${ROUTER}  `;
+    config.forwarder = `  ${FORWARDER}  `;
     process.env.FUND_RELAYER_ID = '  channels-fund  ';
     const loaded = loadConfig(contextWith(config));
     expect(loaded.router).toBe(ROUTER);
+    expect(loaded.forwarder).toBe(FORWARDER);
     expect(loaded.fundRelayerId).toBe('channels-fund');
+  });
+
+  test.each(['', '   ', 7])('rejects an invalid forwarder: %j', (forwarder) => {
+    const config = validPluginConfig();
+    config.forwarder = forwarder;
+    expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: forwarder');
+  });
+
+  test('rejects a forwarder that is the Router itself', () => {
+    const config = validPluginConfig();
+    config.forwarder = ROUTER;
+    expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: forwarder');
   });
 
   test('rejects the retired session block as an unknown key', () => {
@@ -143,6 +159,8 @@ describe('relayParseConfig', () => {
     const config = loadConfig(contextWith(validPluginConfig()));
     expect(relayParseConfig(config)).toEqual({
       router: ROUTER,
+      forwarder: FORWARDER,
+      feeRecipient: FEE_RECIPIENT,
       feeToken: { contractId: FEE_TOKEN, decimals: 7, feeRateBps: 30 },
     });
   });

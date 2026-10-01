@@ -1,9 +1,10 @@
 import { describe, test, expect, beforeEach, afterAll, vi } from 'vitest';
-import { xdr } from '@stellar/stellar-sdk';
+import { Address, scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { PluginContext, Relayer } from '@openzeppelin/relayer-sdk';
 import {
   FEE_RECIPIENT,
   FEE_TOKEN,
+  FORWARDER,
   makeAuthEntry,
   makeCallXdr,
   makeFakeRelayer,
@@ -16,6 +17,7 @@ import {
   XLM_FEED_ID,
 } from './helpers';
 import { DATASTREAMS } from '../src/plugin/constants';
+import { FORWARDER_SLOT } from '../src/plugin/parse';
 
 const channelsHandler = vi.fn();
 vi.mock('@openzeppelin/relayer-plugin-channels', () => ({
@@ -56,6 +58,7 @@ afterAll(() => {
 function pluginConfig(): Record<string, unknown> {
   return {
     router: ROUTER,
+    forwarder: FORWARDER,
     feeRecipient: FEE_RECIPIENT,
     fees: { feeRateBps: 30, feeToken: { contractId: FEE_TOKEN, decimals: 7 } },
     xlmUsdFeedId: XLM_FEED_ID,
@@ -66,7 +69,7 @@ function makeContext(
   route: string,
   params: unknown,
   relayer: Relayer,
-  overrides: { address?: string; networkType?: string } = {}
+  overrides: { address?: string; networkType?: string; config?: Record<string, unknown> } = {}
 ): PluginContext {
   const withInfo = {
     ...(relayer as object),
@@ -78,7 +81,7 @@ function makeContext(
   return {
     route,
     params,
-    config: pluginConfig(),
+    config: overrides.config ?? pluginConfig(),
     api: { useRelayer: vi.fn(() => withInfo) },
   } as unknown as PluginContext;
 }
@@ -211,9 +214,32 @@ describe('submit route', () => {
     const forwarded = channelsHandler.mock.calls[0]![0] as PluginContext;
     expect(forwarded.params).toMatchObject({ skipWait: true });
     const params = forwarded.params as { func: string; auth: string[] };
-    // The forwarded func carries the repriced tail, not the client's placeholder.
-    expect(params.func).not.toBe(wrap.toXDR('base64').toString());
+    // The forwarded func carries the repriced fee, not the client's placeholder, and the signed recipient.
+    const args = xdr.HostFunction.fromXDR(params.func, 'base64').invokeContract().args();
+    expect(scValToNative(args[FORWARDER_SLOT.feeAmount]!)).toBe(1_500n);
+    expect(Address.fromScVal(args[FORWARDER_SLOT.feeRecipient]!).toString()).toBe(FEE_RECIPIENT);
     expect(params.auth).toEqual([signed.toXDR('base64').toString()]);
+  });
+
+  test('rejects a func that targets the Router directly, before any network call', async () => {
+    const func = xdr.HostFunction.hostFunctionTypeInvokeContract(
+      new xdr.InvokeContractArgs({
+        contractAddress: Address.fromString(ROUTER).toScAddress(),
+        functionName: 'multicall',
+        args: [xdr.ScVal.scvVec([])],
+      })
+    );
+    const context = makeContext(
+      '/submit',
+      {
+        func: func.toXDR('base64').toString(),
+        auth: [makeAuthEntry(func, USER, { rootArgs: [] }).toXDR('base64').toString()],
+      },
+      makeFakeRelayer({})
+    );
+    await expect(handler(context)).rejects.toThrow('Relay target must be the configured fee forwarder contract');
+    expect(fetchRelayPrices).not.toHaveBeenCalled();
+    expect(channelsHandler).not.toHaveBeenCalled();
   });
 
   test('caches relayer info across calls on the same fund relayer', async () => {

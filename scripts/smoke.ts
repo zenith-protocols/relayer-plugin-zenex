@@ -3,7 +3,8 @@
 
  What it does
  - Creates a throwaway friendbot-funded user
- - Prepares an XLM self-transfer through the Router's multicall_with_fee
+ - Prepares an XLM self-transfer through the calls route (the fee forwarder's forward → the
+   Router's multicall)
  - Signs the returned auth entry and submits through the plugin
  - Polls the transaction until it lands and verifies it on Horizon
 
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
   };
   const expirationLedger = ledgers._embedded.records[0]!.sequence + EXPIRATION_LEDGER_OFFSET;
 
-  // 3. Prepare an XLM self-transfer through multicall_with_fee.
+  // 3. Prepare an XLM self-transfer through the calls route.
   const prepared = await client.prepareCalls({
     user: user.publicKey(),
     calls: [
