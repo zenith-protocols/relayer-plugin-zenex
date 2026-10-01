@@ -102,7 +102,7 @@ async function handlePrepare(context: PluginContext, route: RelayPrepareRoute): 
   );
 }
 
-// One linear forward: parse, swap the relay-owned tail, simulate once, hand the signed call to the
+// One linear forward: parse, overwrite the relay-owned parts, simulate once, hand the signed call to the
 // embedded channels handler (skipWait). Response and errors are channels' verbatim; the caller polls /status.
 async function handleSubmit(context: PluginContext): Promise<unknown> {
   const request = validateAndParseSubmitRequest(context.params);
@@ -112,14 +112,7 @@ async function handleSubmit(context: PluginContext): Promise<unknown> {
     fetchRelayPrices(parsed.feedId, config.xlmUsdFeedId, dataStreamsAccess(config)),
     resolveFundRelayer(context, config),
   ]);
-  const call = await prepareFinalCall(
-    parsed,
-    config.feeRecipient,
-    prices,
-    fund.address,
-    fund.relayer,
-    config.networkPassphrase
-  );
+  const call = await prepareFinalCall(parsed, prices, fund.address, fund.relayer, config.networkPassphrase);
   return channelsHandler({
     ...context,
     params: {

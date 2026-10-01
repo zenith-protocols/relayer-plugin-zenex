@@ -3,8 +3,8 @@
 
  What it does
  - Creates a throwaway friendbot-funded user
- - Prepares an XLM self-transfer through the calls route (the Router's multicall_with_fee, or
-   the fee forwarder's forward → multicall in forwarder mode)
+ - Prepares an XLM self-transfer through the calls route (the fee forwarder's forward → the
+   Router's multicall)
  - Signs the returned auth entry and submits through the plugin
  - Polls the transaction until it lands and verifies it on Horizon
 

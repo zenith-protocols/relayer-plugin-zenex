@@ -13,14 +13,11 @@ export interface Call {
   args: xdr.ScVal[];
 }
 
-/** The prepare route, which selects the Router wrap and its return ABI. */
+/** The prepare route, which selects the forwarder entry point, its Router target, and the return ABI. */
 export type RelayPrepareRoute = 'calls' | 'fill' | 'try-fill';
 
-/**
- * The request fields every wrap carries: the Router `*_with_fee` prefix the user authorizes, and in
- * forwarder mode the fee terms, user, and Router batch of the forwarder wrap.
- */
-export type RouterWrapPrefix = {
+/** What the user authorizes in every wrap: the Router batch, the user, and the fee terms. */
+export type WrapPrefix = {
   calls: Call[];
   user: string;
   feeToken: string;
@@ -28,48 +25,34 @@ export type RouterWrapPrefix = {
   feeExpirationLedger: number;
 };
 
-/** The relay-supplied unsigned tail; keeper+price extend it on priced wraps. */
-export type RouterWrapTail = {
+/**
+ * The relay-supplied unsigned part of a wrap: the fee, plus keeper and price inside a priced wrap's
+ * `target_args`. The recipient is not in it — the user signs the configured one.
+ */
+export type WrapTail = {
   feeAmountAtomic: bigint;
-  feeRecipient: string;
   keeper?: string;
   priceUpdate?: Uint8Array;
 };
 
-/**
- * The relay-supplied unsigned part of a forwarder wrap: the fee, plus keeper+price inside a priced
- * wrap's `target_args`. The recipient is not in it — the user signs the forwarder's recipient.
- */
-export type ForwarderWrapTail = Omit<RouterWrapTail, 'feeRecipient'>;
-
-/** Forwarder mode: the fee forwarder every relayed func targets, and the recipient its users sign. */
-export type ForwarderPolicy = {
-  contract: string;
-  feeRecipient: string;
-};
-
-/** Router mode wraps the calls in a Router `*_with_fee`; forwarder mode in the fee forwarder's `forward*`. */
-export type RelayMode = 'router' | 'forwarder';
-
-// Submit-side policy: the configured Router (or forwarder) at exact arity and the configured fee token.
-// Inner calls pass through untouched — the user pays the relay fee, and Soroban
-// auth enforces what their signature grants on-chain.
+// Submit-side policy: the configured forwarder at exact arity, wrapping the configured Router and paying
+// the configured recipient in the configured fee token. Inner calls pass through untouched — the user pays
+// the relay fee, and Soroban auth enforces what their signature grants on-chain.
 export type RelayParseConfig = {
   router: string;
-  /** Present selects forwarder mode; absent keeps the Router `*_with_fee` mode. */
-  forwarder?: ForwarderPolicy;
+  forwarder: string;
+  feeRecipient: string;
   feeToken: { contractId: string; decimals: number; feeRateBps: number };
 };
 
 export interface ParsedRelayCall {
-  mode: RelayMode;
   priced: boolean;
   user: string;
   feeRateBps: number;
   maximumFeeAtomic: bigint;
   feeExpiration: number;
   feedId: string | null;
-  /** The client's round-tripped func; its tail is overwritten before any use. */
+  /** The client's round-tripped func; its relay-owned parts are overwritten before any use. */
   func: xdr.HostFunction;
   /** The signed entries, decoded once at parse and forwarded as-is. */
   auth: xdr.SorobanAuthorizationEntry[];

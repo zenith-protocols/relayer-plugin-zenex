@@ -12,6 +12,7 @@ const savedEnv = Object.fromEntries([...ENV_KEYS, ...OPTIONAL_ENV_KEYS].map((key
 function validPluginConfig(): Record<string, unknown> {
   return {
     router: ROUTER,
+    forwarder: FORWARDER,
     feeRecipient: FEE_RECIPIENT,
     fees: { feeRateBps: 30, feeToken: { contractId: FEE_TOKEN, decimals: 7 } },
     xlmUsdFeedId: XLM_FEED_ID,
@@ -42,6 +43,7 @@ describe('loadConfig', () => {
     const config = loadConfig(contextWith(validPluginConfig()));
     expect(config).toEqual({
       router: ROUTER,
+      forwarder: FORWARDER,
       feeRecipient: FEE_RECIPIENT,
       feeRateBps: 30,
       feeTokenContractId: FEE_TOKEN,
@@ -87,7 +89,7 @@ describe('loadConfig', () => {
     expect(() => loadConfig(contextWith(config))).toThrow('Invalid plugin config: fees.feeToken.decimals');
   });
 
-  test.each(['router', 'feeRecipient', 'xlmUsdFeedId'] as const)('rejects a missing %s', (field) => {
+  test.each(['router', 'forwarder', 'feeRecipient', 'xlmUsdFeedId'] as const)('rejects a missing %s', (field) => {
     const config = validPluginConfig();
     delete config[field];
     expect(() => loadConfig(contextWith(config))).toThrow(`Invalid plugin config: ${field}`);
@@ -125,20 +127,12 @@ describe('loadConfig', () => {
   test('trims whitespace from config strings and env values', () => {
     const config = validPluginConfig();
     config.router = `  ${ROUTER}  `;
+    config.forwarder = `  ${FORWARDER}  `;
     process.env.FUND_RELAYER_ID = '  channels-fund  ';
     const loaded = loadConfig(contextWith(config));
     expect(loaded.router).toBe(ROUTER);
+    expect(loaded.forwarder).toBe(FORWARDER);
     expect(loaded.fundRelayerId).toBe('channels-fund');
-  });
-
-  test('loads forwarder mode when a forwarder is configured', () => {
-    const config = validPluginConfig();
-    config.forwarder = `  ${FORWARDER}  `;
-    expect(loadConfig(contextWith(config)).forwarder).toBe(FORWARDER);
-  });
-
-  test('leaves forwarder unset in router mode', () => {
-    expect(loadConfig(contextWith(validPluginConfig()))).not.toHaveProperty('forwarder');
   });
 
   test.each(['', '   ', 7])('rejects an invalid forwarder: %j', (forwarder) => {
@@ -165,16 +159,8 @@ describe('relayParseConfig', () => {
     const config = loadConfig(contextWith(validPluginConfig()));
     expect(relayParseConfig(config)).toEqual({
       router: ROUTER,
-      feeToken: { contractId: FEE_TOKEN, decimals: 7, feeRateBps: 30 },
-    });
-  });
-
-  test('carries the forwarder and its signed recipient in forwarder mode', () => {
-    const config = validPluginConfig();
-    config.forwarder = FORWARDER;
-    expect(relayParseConfig(loadConfig(contextWith(config)))).toEqual({
-      router: ROUTER,
-      forwarder: { contract: FORWARDER, feeRecipient: FEE_RECIPIENT },
+      forwarder: FORWARDER,
+      feeRecipient: FEE_RECIPIENT,
       feeToken: { contractId: FEE_TOKEN, decimals: 7, feeRateBps: 30 },
     });
   });

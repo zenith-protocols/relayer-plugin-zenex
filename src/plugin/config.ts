@@ -14,14 +14,11 @@ import { RelayParseConfig } from './types';
 export const FEED_ID_PATTERN = /^0x0003[0-9a-fA-F]{60}$/i;
 
 export interface ZenexConfig {
-  /** The Router contract every relayed func targets (in forwarder mode, as the forwarder's target). */
+  /** The Router contract the fee forwarder calls for every relay. */
   router: string;
-  /**
-   * The fee forwarder contract. Present selects forwarder mode: relays wrap the Router call in its
-   * `forward` / `forward_dynamic`. Absent keeps the Router `*_with_fee` mode.
-   */
-  forwarder?: string;
-  /** Router mode splices it into relay-owned tails; forwarder mode has the user sign it. A Stellar account or contract. */
+  /** The fee forwarder contract every relay goes through: its `forward` / `forward_dynamic`. */
+  forwarder: string;
+  /** The recipient users sign in every forward. A Stellar account or contract that can hold the fee token. */
   feeRecipient: string;
   feeRateBps: number;
   feeTokenContractId: string;
@@ -109,13 +106,13 @@ export function loadConfig(context: PluginContext): ZenexConfig {
   }
 
   const router = requireConfigString(config.router, 'router');
-  const forwarder = config.forwarder === undefined ? undefined : requireConfigString(config.forwarder, 'forwarder');
+  const forwarder = requireConfigString(config.forwarder, 'forwarder');
   // The forwarder wraps the Router; one contract in both roles is a misconfiguration.
   if (forwarder === router) configInvalid('forwarder');
 
   return {
     router,
-    ...(forwarder === undefined ? {} : { forwarder }),
+    forwarder,
     feeRecipient: requireConfigString(config.feeRecipient, 'feeRecipient'),
     feeRateBps,
     feeTokenContractId: requireConfigString(feeToken.contractId, 'fees.feeToken.contractId'),
@@ -198,9 +195,8 @@ export function dataStreamsAccess(config: ZenexConfig): DataStreamsAccess {
 export function relayParseConfig(config: ZenexConfig): RelayParseConfig {
   return {
     router: config.router,
-    ...(config.forwarder === undefined
-      ? {}
-      : { forwarder: { contract: config.forwarder, feeRecipient: config.feeRecipient } }),
+    forwarder: config.forwarder,
+    feeRecipient: config.feeRecipient,
     feeToken: {
       contractId: config.feeTokenContractId,
       decimals: config.feeTokenDecimals,

@@ -1,19 +1,13 @@
 /**
- * Shared fixtures for the zenex plugin tests: addresses, Router call XDRs, Router and fee forwarder
- * wraps, auth-entry construction matching the relay's auth projections, and a fake Relayer over
- * canned simulateTransaction responses.
+ * Shared fixtures for the zenex plugin tests: addresses, Router call XDRs, fee forwarder wraps,
+ * auth-entry construction matching the args the user signs, and a fake Relayer over canned
+ * simulateTransaction responses.
  */
 
 import { Address, Keypair, StrKey, xdr } from '@stellar/stellar-sdk';
 import type { Relayer } from '@openzeppelin/relayer-sdk';
-import {
-  authProjection,
-  buildForwarderWrap,
-  buildRouterWrap,
-  decodeCallXdrs,
-  PLACEHOLDER_FEE_AMOUNT_ATOMIC,
-} from '../src/plugin/parse';
-import type { RelayMode, RelayParseConfig, RelayPrepareRoute } from '../src/plugin/types';
+import { buildWrap, decodeCallXdrs, PLACEHOLDER_FEE_AMOUNT_ATOMIC, signedArgs } from '../src/plugin/parse';
+import type { RelayParseConfig, RelayPrepareRoute } from '../src/plugin/types';
 
 /** The live XLM/USD Data Streams feed id (the oracle contracts' test vector). */
 export const XLM_FEED_ID = '0x000358cb12b1f5bbeca8b5b4666025a40b15520af1f82516ee2fb9a335055e9a';
@@ -28,15 +22,12 @@ export const SOURCE = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 5)).publicKey(
 export const FEE_RECIPIENT = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 6)).publicKey();
 export const FORWARDER = StrKey.encodeContract(Buffer.alloc(32, 7));
 
+/** `FORWARDER` wrapping `ROUTER`, paying `FEE_RECIPIENT` in `FEE_TOKEN`. */
 export const PARSE_CONFIG: RelayParseConfig = {
   router: ROUTER,
+  forwarder: FORWARDER,
+  feeRecipient: FEE_RECIPIENT,
   feeToken: { contractId: FEE_TOKEN, decimals: 7, feeRateBps: 30 },
-};
-
-/** Forwarder mode: the same Router and fee token, wrapped by `FORWARDER` paying `FEE_RECIPIENT`. */
-export const FORWARDER_PARSE_CONFIG: RelayParseConfig = {
-  ...PARSE_CONFIG,
-  forwarder: { contract: FORWARDER, feeRecipient: FEE_RECIPIENT },
 };
 
 /** One Router `Call` ScMap (keys in sorted order), base64-encoded. */
@@ -70,27 +61,13 @@ function wrapPrefix(route: RelayPrepareRoute, options: WrapOptions) {
   };
 }
 
-/** The route's Router wrap exactly as prepare builds it (placeholder tail, keeper = user). */
+/** The route's wrap exactly as prepare builds it (placeholder fee, the configured recipient, keeper = user). */
 export function makeWrap(route: RelayPrepareRoute, options: WrapOptions = {}): xdr.HostFunction {
   const prefix = wrapPrefix(route, options);
-  const tail = { feeAmountAtomic: PLACEHOLDER_FEE_AMOUNT_ATOMIC, feeRecipient: prefix.user };
-  return route === 'calls'
-    ? buildRouterWrap(ROUTER, route, prefix, tail)
-    : buildRouterWrap(ROUTER, route, prefix, {
-        ...tail,
-        keeper: prefix.user,
-        priceUpdate: options.market ?? Uint8Array.from([1, 2, 3]),
-      });
-}
-
-/** The route's forwarder wrap exactly as prepare builds it (placeholder fee, signed recipient, keeper = user). */
-export function makeForwarderWrap(route: RelayPrepareRoute, options: WrapOptions = {}): xdr.HostFunction {
-  const prefix = wrapPrefix(route, options);
-  const forwarder = FORWARDER_PARSE_CONFIG.forwarder!;
   const tail = { feeAmountAtomic: PLACEHOLDER_FEE_AMOUNT_ATOMIC };
   return route === 'calls'
-    ? buildForwarderWrap(ROUTER, forwarder, route, prefix, tail)
-    : buildForwarderWrap(ROUTER, forwarder, route, prefix, {
+    ? buildWrap(PARSE_CONFIG, route, prefix, tail)
+    : buildWrap(PARSE_CONFIG, route, prefix, {
         ...tail,
         keeper: prefix.user,
         priceUpdate: options.market ?? Uint8Array.from([1, 2, 3]),
@@ -112,14 +89,13 @@ export function withArg(func: xdr.HostFunction, slot: number, value: xdr.ScVal):
 }
 
 /**
- * An address-credentials auth entry rooted at the relay's auth projection of `func` (Router outer
- * args 0/2/3/4, or the forwarder projection in forwarder mode) — what a discovery simulation returns
- * for the user.
+ * An address-credentials auth entry rooted at the args the user signs for `func` — what a discovery
+ * simulation returns for the user.
  */
 export function makeAuthEntry(
   func: xdr.HostFunction,
   signer: string,
-  options: { expiration?: number; rootArgs?: xdr.ScVal[]; mode?: RelayMode } = {}
+  options: { expiration?: number; rootArgs?: xdr.ScVal[] } = {}
 ): xdr.SorobanAuthorizationEntry {
   const invocation = func.invokeContract();
   return new xdr.SorobanAuthorizationEntry({
@@ -136,7 +112,7 @@ export function makeAuthEntry(
         new xdr.InvokeContractArgs({
           contractAddress: invocation.contractAddress(),
           functionName: invocation.functionName(),
-          args: options.rootArgs ?? authProjection(func, options.mode ?? 'router'),
+          args: options.rootArgs ?? signedArgs(func),
         })
       ),
       subInvocations: [],

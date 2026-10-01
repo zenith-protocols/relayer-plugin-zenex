@@ -5,11 +5,9 @@ import { prepareRelayEntries } from '../src/plugin/prepare';
 import type { RelayPrepareRequest } from '../src/plugin/types';
 import {
   FEE_RECIPIENT,
-  FORWARDER_PARSE_CONFIG,
   makeAuthEntry,
   makeCallXdr,
   makeFakeRelayer,
-  makeForwarderWrap,
   makeSourceAccountEntry,
   makeWrap,
   OTHER_CONTRACT,
@@ -52,6 +50,9 @@ describe('prepareRelayEntries', () => {
     );
 
     expect(result.func).toBe(wrap.toXDR('base64').toString());
+    // The user signs the configured recipient, not a placeholder.
+    const args = xdr.HostFunction.fromXDR(result.func, 'base64').invokeContract().args();
+    expect(Address.fromScVal(args[FORWARDER_SLOT.feeRecipient]!).toString()).toBe(FEE_RECIPIENT);
     // The relay's own source-account entry never travels.
     expect(result.authEntries).toHaveLength(1);
     const entry = result.authEntries[0]!;
@@ -69,7 +70,7 @@ describe('prepareRelayEntries', () => {
     });
   });
 
-  test('builds a priced wrap carrying the market update on try-fill', async () => {
+  test('builds a priced wrap carrying the market update in target_args on try-fill', async () => {
     const wrap = makeWrap('try-fill', { market: MARKET });
     const relayer = makeFakeRelayer({
       record: { auth: [makeAuthEntry(wrap, USER)], retval: xdr.ScVal.scvVec([xdr.ScVal.scvU32(1)]), latestLedger: 100 },
@@ -153,6 +154,20 @@ describe('prepareRelayEntries', () => {
     ).rejects.toMatchObject({ code: 'DISCOVERY_INVOCATION_MISMATCH' });
   });
 
+  test('fails closed when forward is authorized without its target args', async () => {
+    const wrap = makeWrap('calls');
+    const args = wrap.invokeContract().args();
+    const dynamicEntry = makeAuthEntry(wrap, USER, {
+      rootArgs: [args[0]!, args[2]!, args[3]!, args[8]!, args[4]!, args[5]!],
+    });
+    const relayer = makeFakeRelayer({
+      record: { auth: [dynamicEntry], retval: xdr.ScVal.scvVec([]), latestLedger: 100 },
+    });
+    await expect(
+      prepareRelayEntries('calls', makeRequest(), PARSE_CONFIG, Networks.TESTNET, relayer, SOURCE, null)
+    ).rejects.toMatchObject({ code: 'DISCOVERY_INVOCATION_MISMATCH' });
+  });
+
   test('rejects an invocation that needs no user authorization', async () => {
     const wrap = makeWrap('calls');
     const relayer = makeFakeRelayer({
@@ -170,85 +185,5 @@ describe('prepareRelayEntries', () => {
     await expect(
       prepareRelayEntries('calls', makeRequest(), PARSE_CONFIG, Networks.TESTNET, relayer, SOURCE, null)
     ).rejects.toMatchObject({ code: 'SIMULATION_FAILED' });
-  });
-});
-
-describe('prepareRelayEntries (forwarder mode)', () => {
-  test('wraps the calls route in forward with the configured recipient, not a placeholder', async () => {
-    const wrap = makeForwarderWrap('calls');
-    const relayer = makeFakeRelayer({
-      record: {
-        auth: [makeAuthEntry(wrap, USER, { mode: 'forwarder' }), makeSourceAccountEntry(wrap)],
-        retval: xdr.ScVal.scvVec([xdr.ScVal.scvU32(9)]),
-        latestLedger: 100,
-      },
-    });
-
-    const result = await prepareRelayEntries(
-      'calls',
-      makeRequest(),
-      FORWARDER_PARSE_CONFIG,
-      Networks.TESTNET,
-      relayer,
-      SOURCE,
-      null
-    );
-
-    expect(result.func).toBe(wrap.toXDR('base64').toString());
-    const args = xdr.HostFunction.fromXDR(result.func, 'base64').invokeContract().args();
-    expect(Address.fromScVal(args[FORWARDER_SLOT.feeRecipient]!).toString()).toBe(FEE_RECIPIENT);
-    expect(result.authEntries).toHaveLength(1);
-    expect(result.authEntries[0]!.signer).toBe(USER);
-    expect(result.outcome).toEqual({ kind: 'callOutcomes', results: [{ ok: true, value: 9, error: 0 }] });
-  });
-
-  test('wraps try-fill in forward_dynamic carrying the market update in target_args', async () => {
-    const wrap = makeForwarderWrap('try-fill', { market: MARKET });
-    const relayer = makeFakeRelayer({
-      record: {
-        auth: [makeAuthEntry(wrap, USER, { mode: 'forwarder' })],
-        retval: xdr.ScVal.scvVec([xdr.ScVal.scvU32(1)]),
-        latestLedger: 100,
-      },
-    });
-    const result = await prepareRelayEntries(
-      'try-fill',
-      makeRequest(),
-      FORWARDER_PARSE_CONFIG,
-      Networks.TESTNET,
-      relayer,
-      SOURCE,
-      MARKET
-    );
-    expect(result.func).toBe(wrap.toXDR('base64').toString());
-    expect(result.outcome.kind).toBe('fills');
-  });
-
-  test('fails closed on an entry rooted at the Router projection', async () => {
-    const wrap = makeForwarderWrap('calls');
-    const relayer = makeFakeRelayer({
-      record: {
-        auth: [makeAuthEntry(wrap, USER, { mode: 'router' })],
-        retval: xdr.ScVal.scvVec([]),
-        latestLedger: 100,
-      },
-    });
-    await expect(
-      prepareRelayEntries('calls', makeRequest(), FORWARDER_PARSE_CONFIG, Networks.TESTNET, relayer, SOURCE, null)
-    ).rejects.toMatchObject({ code: 'DISCOVERY_INVOCATION_MISMATCH' });
-  });
-
-  test('fails closed when forward is authorized without its target args', async () => {
-    const wrap = makeForwarderWrap('calls');
-    const args = wrap.invokeContract().args();
-    const dynamicEntry = makeAuthEntry(wrap, USER, {
-      rootArgs: [args[0]!, args[2]!, args[3]!, args[8]!, args[4]!, args[5]!],
-    });
-    const relayer = makeFakeRelayer({
-      record: { auth: [dynamicEntry], retval: xdr.ScVal.scvVec([]), latestLedger: 100 },
-    });
-    await expect(
-      prepareRelayEntries('calls', makeRequest(), FORWARDER_PARSE_CONFIG, Networks.TESTNET, relayer, SOURCE, null)
-    ).rejects.toMatchObject({ code: 'DISCOVERY_INVOCATION_MISMATCH' });
   });
 });
