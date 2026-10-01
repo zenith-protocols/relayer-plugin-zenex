@@ -18,7 +18,7 @@ export interface ZenexConfig {
   router: string;
   /**
    * The fee forwarder contract. Present selects forwarder mode: relays wrap the Router call in its
-   * `forward` / `forward_unsafe`. Absent keeps the Router `*_with_fee` mode.
+   * `forward` / `forward_dynamic`. Absent keeps the Router `*_with_fee` mode.
    */
   forwarder?: string;
   /** Router mode splices it into relay-owned tails; forwarder mode has the user sign it. A Stellar account or contract. */

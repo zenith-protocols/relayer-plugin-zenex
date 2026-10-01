@@ -207,10 +207,10 @@ describe('buildForwarderWrap', () => {
   test.each([
     ['fill', 'create_and_fill'],
     ['try-fill', 'create_and_try_fill'],
-  ] as const)('wraps %s in forward_unsafe → %s with keeper and price in target_args', (route, target) => {
+  ] as const)('wraps %s in forward_dynamic → %s with keeper and price in target_args', (route, target) => {
     const market = Uint8Array.from([9, 9, 9]);
     const invocation = makeForwarderWrap(route, { market }).invokeContract();
-    expect(invocation.functionName().toString()).toBe('forward_unsafe');
+    expect(invocation.functionName().toString()).toBe('forward_dynamic');
     const args = invocation.args();
     expect(args[FORWARDER_SLOT.targetFunction]!.sym().toString()).toBe(target);
     const targetArgs = args[FORWARDER_SLOT.targetArgs]!.vec()!;
@@ -238,7 +238,7 @@ describe('authProjection', () => {
     );
   });
 
-  test('forward_unsafe leaves target args out', () => {
+  test('forward_dynamic leaves target args out', () => {
     const wrap = makeForwarderWrap('try-fill');
     const args = wrap.invokeContract().args();
     expect(xdrOf(authProjection(wrap, 'forwarder'))).toEqual(
@@ -320,8 +320,8 @@ describe('parseSubmitRequest (forwarder mode)', () => {
     );
   });
 
-  test('rejects multicall under forward_unsafe, which would leave the batch unsigned', () => {
-    expect(() => parse(withEntry(makeForwarderWrap('calls'), 'forward_unsafe'))).toThrow(
+  test('rejects multicall under forward_dynamic, which would leave the batch unsigned', () => {
+    expect(() => parse(withEntry(makeForwarderWrap('calls'), 'forward_dynamic'))).toThrow(
       'does not match its forwarder entry point'
     );
   });

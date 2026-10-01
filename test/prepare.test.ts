@@ -202,7 +202,7 @@ describe('prepareRelayEntries (forwarder mode)', () => {
     expect(result.outcome).toEqual({ kind: 'callOutcomes', results: [{ ok: true, value: 9, error: 0 }] });
   });
 
-  test('wraps try-fill in forward_unsafe carrying the market update in target_args', async () => {
+  test('wraps try-fill in forward_dynamic carrying the market update in target_args', async () => {
     const wrap = makeForwarderWrap('try-fill', { market: MARKET });
     const relayer = makeFakeRelayer({
       record: {
@@ -241,11 +241,11 @@ describe('prepareRelayEntries (forwarder mode)', () => {
   test('fails closed when forward is authorized without its target args', async () => {
     const wrap = makeForwarderWrap('calls');
     const args = wrap.invokeContract().args();
-    const unsafe = makeAuthEntry(wrap, USER, {
+    const dynamicEntry = makeAuthEntry(wrap, USER, {
       rootArgs: [args[0]!, args[2]!, args[3]!, args[8]!, args[4]!, args[5]!],
     });
     const relayer = makeFakeRelayer({
-      record: { auth: [unsafe], retval: xdr.ScVal.scvVec([]), latestLedger: 100 },
+      record: { auth: [dynamicEntry], retval: xdr.ScVal.scvVec([]), latestLedger: 100 },
     });
     await expect(
       prepareRelayEntries('calls', makeRequest(), FORWARDER_PARSE_CONFIG, Networks.TESTNET, relayer, SOURCE, null)

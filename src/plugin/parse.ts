@@ -127,18 +127,18 @@ const PRICED_ARGUMENTS = ROUTER_SLOT.priceUpdate + 1;
 
 /**
  * The fee forwarder entry point and Router target each prepare route uses in forwarder mode. Only
- * `forward_unsafe` leaves `target_args` unsigned, so only the priced routes, whose keeper and price the
+ * `forward_dynamic` leaves `target_args` unsigned, so only the priced routes, whose keeper and price the
  * relay refreshes after signing, use it.
  */
 const FORWARDER_ROUTES = {
   calls: { entry: 'forward', target: 'multicall' },
-  'try-fill': { entry: 'forward_unsafe', target: 'create_and_try_fill' },
-  fill: { entry: 'forward_unsafe', target: 'create_and_fill' },
+  'try-fill': { entry: 'forward_dynamic', target: 'create_and_try_fill' },
+  fill: { entry: 'forward_dynamic', target: 'create_and_fill' },
 } as const satisfies Record<RelayPrepareRoute, { entry: string; target: string }>;
 
 /**
  * Argument slots of the fee forwarder's two entry points, fixed by its ABI:
- *   forward[_unsafe](fee_token, fee_amount, max_fee_amount, expiration_ledger,
+ *   forward[_dynamic](fee_token, fee_amount, max_fee_amount, expiration_ledger,
  *                    target_contract, target_fn, target_args, user, fee_recipient)
  */
 export const FORWARDER_SLOT = {
@@ -170,8 +170,8 @@ export const TARGET_SLOT = {
 const UNPRICED_TARGET_ARGUMENTS = TARGET_SLOT.calls + 1;
 const PRICED_TARGET_ARGUMENTS = TARGET_SLOT.priceUpdate + 1;
 
-/** The outer slots the forwarder's `forward_unsafe` authenticates, in its projection order. */
-const FORWARD_UNSAFE_PROJECTION = [
+/** The outer slots the forwarder's `forward_dynamic` authenticates, in its projection order. */
+const FORWARD_DYNAMIC_PROJECTION = [
   FORWARDER_SLOT.feeToken,
   FORWARDER_SLOT.maximumFee,
   FORWARDER_SLOT.feeExpiration,
@@ -188,8 +188,8 @@ const FORWARD_UNSAFE_PROJECTION = [
  */
 const AUTH_PROJECTIONS = {
   router: [ROUTER_SLOT.calls, ROUTER_SLOT.feeToken, ROUTER_SLOT.maximumFee, ROUTER_SLOT.feeExpiration],
-  forward: [...FORWARD_UNSAFE_PROJECTION, FORWARDER_SLOT.targetArgs],
-  forward_unsafe: FORWARD_UNSAFE_PROJECTION,
+  forward: [...FORWARD_DYNAMIC_PROJECTION, FORWARDER_SLOT.targetArgs],
+  forward_dynamic: FORWARD_DYNAMIC_PROJECTION,
 } as const;
 
 /** The outer args the user's root auth entry pins for `func`, in the contract's projection order. */
@@ -202,7 +202,7 @@ export function authProjection(func: xdr.HostFunction, mode: RelayMode): xdr.ScV
       ? AUTH_PROJECTIONS.router
       : entry === FORWARDER_ROUTES.calls.entry
         ? AUTH_PROJECTIONS.forward
-        : AUTH_PROJECTIONS.forward_unsafe;
+        : AUTH_PROJECTIONS.forward_dynamic;
   return slots.map((slot) => args[slot]!);
 }
 
@@ -360,7 +360,7 @@ function parseRouterSubmit(request: RelaySubmitRequest, config: RelayParseConfig
   };
 }
 
-// Forwarder ABI policy over a decoded submit body. `forward_unsafe` leaves `target_args` unsigned, so
+// Forwarder ABI policy over a decoded submit body. `forward_dynamic` leaves `target_args` unsigned, so
 // the relay pins what it can check here — the Router target, its function, the batch shape, the fill
 // user — and submit overwrites the rest (keeper, price). The recipient is signed: it must already be
 // the configured one, since submit never rewrites it.
@@ -416,7 +416,7 @@ function parseForwarderSubmit(
     invalidParams('Relay forward target args must match the Router function exactly');
   }
   checkRouterCalls(targetArgs[TARGET_SLOT.calls]!);
-  // Unsigned under `forward_unsafe`: the fill must target the signer's own order.
+  // Unsigned under `forward_dynamic`: the fill must target the signer's own order.
   if (priced && scAddress(targetArgs[TARGET_SLOT.user]!, 'relay fill user') !== user) {
     invalidParams('Relay fill user must be the signing user');
   }

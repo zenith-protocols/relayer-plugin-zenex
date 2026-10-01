@@ -133,11 +133,11 @@ the forwarder's target.
 ```text
 calls            forward(fee_token, fee_amount, max_fee_amount, expiration_ledger,
                          router, "multicall", [calls], user, fee_recipient)
-fill, try-fill   forward_unsafe(<same>, router, "create_and_[try_]fill",
+fill, try-fill   forward_dynamic(<same>, router, "create_and_[try_]fill",
                                 [calls, user, keeper, price], user, fee_recipient)
 ```
 
-`forward` signs the batch. `forward_unsafe` leaves `target_args` unsigned, so
+`forward` signs the batch. `forward_dynamic` leaves `target_args` unsigned, so
 submit can put in the keeper and a fresh Data Streams report. The user signs
 `fee_recipient` in both: prepare puts the configured `feeRecipient` in, and
 submit rejects any other and rewrites only `fee_amount` (plus keeper and price

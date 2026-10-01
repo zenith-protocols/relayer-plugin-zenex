@@ -101,7 +101,7 @@ export class ZenexClient {
   }
 
   /**
-   * Prepare a priced fill (`create_and_fill_with_fee`, or `forward_unsafe` → `create_and_fill` in forwarder
+   * Prepare a priced fill (`create_and_fill_with_fee`, or `forward_dynamic` → `create_and_fill` in forwarder
    * mode); `feedId` is required
    *
    * @param request Prepare request; `calls[0]` must be `create_order`
@@ -115,7 +115,7 @@ export class ZenexClient {
   }
 
   /**
-   * Prepare a priced try-fill (`create_and_try_fill_with_fee`, or `forward_unsafe` → `create_and_try_fill` in
+   * Prepare a priced try-fill (`create_and_try_fill_with_fee`, or `forward_dynamic` → `create_and_try_fill` in
    * forwarder mode); `feedId` is required
    *
    * @param request Prepare request with the user, calls, expiration, and fee cap
